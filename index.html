@@ -52,29 +52,29 @@
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             }
 
-            .device-card {
-                border: none;
-                border-radius: 12px;
-                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-                transition: all 0.3s ease;
-                overflow: hidden;
-                height: 100%;
+            .device-row {
+                background: white;
+                border: 1px solid #e9ecef;
+                border-radius: 8px;
+                margin-bottom: 8px;
+                padding: 16px;
+                transition: all 0.2s ease;
             }
 
-            .device-card:hover {
-                transform: translateY(-4px);
-                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+            .device-row:hover {
+                box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+                transform: translateX(4px);
             }
 
-            .device-card.status-pass {
+            .device-row.status-pass {
                 border-left: 4px solid #28a745;
             }
 
-            .device-card.status-failures {
+            .device-row.status-failures {
                 border-left: 4px solid #dc3545;
             }
 
-            .device-card.status-loading {
+            .device-row.status-loading {
                 border-left: 4px solid #6c757d;
             }
 
@@ -222,6 +222,46 @@
             .btn-close-white {
                 filter: brightness(0) invert(1);
             }
+
+            .search-container {
+                background: white;
+                border-radius: 8px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            }
+
+            .filter-badge {
+                background-color: #e9ecef;
+                color: #495057;
+                padding: 0.25rem 0.5rem;
+                border-radius: 4px;
+                font-size: 0.875rem;
+                margin-left: 0.5rem;
+            }
+
+            .device-info {
+                flex: 1;
+            }
+
+            .device-stats {
+                display: flex;
+                gap: 1rem;
+                align-items: center;
+            }
+
+            @media (max-width: 768px) {
+                .device-row {
+                    padding: 12px;
+                }
+
+                .device-stats {
+                    flex-direction: column;
+                    align-items: flex-start;
+                    gap: 0.5rem;
+                    margin-top: 0.5rem;
+                }
+            }
         </style>
     </head>
     <body>
@@ -264,12 +304,69 @@
                 <!-- Stats will be loaded here -->
             </div>
 
+            <!-- Search and Filter Container -->
+            <div class="search-container">
+                <div class="row align-items-center">
+                    <div class="col-md-6">
+                        <div class="input-group">
+                            <span class="input-group-text">
+                                <i class="bi bi-search"></i>
+                            </span>
+                            <input
+                                type="text"
+                                class="form-control"
+                                id="searchInput"
+                                placeholder="Search by device name or model..."
+                                onkeyup="filterDevices()"
+                            />
+                        </div>
+                    </div>
+                    <div class="col-md-6 mt-2 mt-md-0">
+                        <div class="btn-group" role="group">
+                            <input
+                                type="radio"
+                                class="btn-check"
+                                name="filterOptions"
+                                id="filterAll"
+                                value="all"
+                                checked
+                                onchange="filterDevices()"
+                            />
+                            <label
+                                class="btn btn-outline-primary"
+                                for="filterAll"
+                            >
+                                All Devices
+                            </label>
+
+                            <input
+                                type="radio"
+                                class="btn-check"
+                                name="filterOptions"
+                                id="filterFailed"
+                                value="failed"
+                                onchange="filterDevices()"
+                            />
+                            <label
+                                class="btn btn-outline-danger"
+                                for="filterFailed"
+                            >
+                                Failed Tests Only
+                            </label>
+                        </div>
+                        <span class="filter-badge" id="filterCount">
+                            <!-- Count will be shown here -->
+                        </span>
+                    </div>
+                </div>
+            </div>
+
             <!-- Error Container -->
             <div id="error-container"></div>
 
-            <!-- Device Cards Container -->
-            <div class="row" id="device-container">
-                <div class="col-12 text-center py-5">
+            <!-- Device List Container -->
+            <div id="device-container">
+                <div class="text-center py-5">
                     <div class="loading-spinner"></div>
                     <p class="mt-2 text-muted">Loading devices...</p>
                 </div>
@@ -316,6 +413,7 @@
 
             // Global storage for device data
             let devicesData = [];
+            let filteredDevices = [];
 
             // Load devices on page load
             document.addEventListener("DOMContentLoaded", function () {
@@ -329,7 +427,7 @@
 
                     // Show loading state
                     document.getElementById("device-container").innerHTML = `
-                    <div class="col-12 text-center py-5">
+                    <div class="text-center py-5">
                         <div class="loading-spinner"></div>
                         <p class="mt-2 text-muted">Loading devices...</p>
                     </div>
@@ -375,7 +473,7 @@
 
                     // Update UI
                     updateStats();
-                    renderDevices();
+                    filterDevices();
                     updateLastRefreshTime();
                 } catch (error) {
                     console.error("Error loading devices:", error);
@@ -530,30 +628,67 @@
             `;
             }
 
+            function filterDevices() {
+                const searchTerm = document
+                    .getElementById("searchInput")
+                    .value.toLowerCase();
+                const filterType = document.querySelector(
+                    'input[name="filterOptions"]:checked',
+                ).value;
+
+                filteredDevices = devicesData.filter((device) => {
+                    // Search filter
+                    const matchesSearch =
+                        device.device.toLowerCase().includes(searchTerm) ||
+                        (device.name &&
+                            device.name.toLowerCase().includes(searchTerm));
+
+                    // Failed tests filter
+                    const matchesFilter =
+                        filterType === "all" ||
+                        (filterType === "failed" &&
+                            device.report &&
+                            (device.report.failures > 0 ||
+                                device.report.errors > 0));
+
+                    return matchesSearch && matchesFilter;
+                });
+
+                renderDevices();
+                updateFilterCount();
+            }
+
+            function updateFilterCount() {
+                const total = devicesData.length;
+                const shown = filteredDevices.length;
+                document.getElementById("filterCount").textContent =
+                    `${shown} of ${total} devices`;
+            }
+
             function renderDevices() {
                 const container = document.getElementById("device-container");
                 container.innerHTML = "";
 
-                if (devicesData.length === 0) {
+                if (filteredDevices.length === 0) {
                     container.innerHTML = `
-                        <div class="col-12 text-center py-5">
+                        <div class="text-center py-5">
                             <i class="bi bi-inbox fs-1 text-muted"></i>
-                            <p class="mt-2 text-muted">No devices found</p>
+                            <p class="mt-2 text-muted">No devices match your filter criteria</p>
                         </div>
                     `;
                     return;
                 }
 
-                devicesData.forEach((device, index) => {
-                    const card = createDeviceCard(device, index);
-                    if (card != undefined) {
-                        container.innerHTML += card;
-                    }
+                filteredDevices.forEach((device, index) => {
+                    const deviceElement = createDeviceRow(
+                        device,
+                        devicesData.indexOf(device),
+                    );
+                    container.appendChild(deviceElement);
                 });
             }
 
-            function createDeviceCard(device, index) {
-                // Show all devices, even those without reports
+            function createDeviceRow(device, originalIndex) {
                 const report = device.report;
                 let statusClass = "loading";
 
@@ -564,12 +699,13 @@
                             : "failures";
                 }
 
+                const row = document.createElement("div");
+                row.className = `device-row status-${statusClass}`;
+
                 let testSummary = "";
                 if (report) {
                     testSummary = `
-                    <div class="mb-3">
-                        <h6 class="text-muted small mb-2">Test Results</h6>
-                        <div class="d-flex flex-wrap gap-2">
+                        <div class="d-flex gap-3">
                             <span class="badge bg-light text-dark">
                                 <span class="test-indicator passed"></span>
                                 ${report.passed} passed
@@ -582,55 +718,51 @@
                                 <span class="test-indicator skipped"></span>
                                 ${report.skipped} skipped
                             </span>
+                            <span class="text-muted small">
+                                <i class="bi bi-clock"></i> ${report.time.toFixed(2)}s
+                            </span>
                         </div>
-                        <small class="text-muted d-block mt-2">
-                            <i class="bi bi-clock"></i> ${report.time.toFixed(2)}s
-                        </small>
-                    </div>
-                `;
+                    `;
                 } else {
                     testSummary = `
-                    <div class="mb-3">
-                        <p class="text-muted small mb-0">
+                        <div class="text-muted small">
                             <i class="bi bi-hourglass-split"></i> No test results available
-                        </p>
-                        <small class="text-muted">Test data might not have been uploaded yet</small>
-                    </div>
-                `;
+                        </div>
+                    `;
                 }
 
-                return `
-                <div class="col-lg-4 col-md-6 mb-4">
-                    <div class="card device-card status-${statusClass}">
-                        <div class="card-body">
-                            <div class="d-flex justify-content-between align-items-start mb-3">
-                                <div>
-                                    <h5 class="card-title mb-1">${device.name || device.device}</h5>
-                                    <p class="text-muted small mb-0">Device: ${device.device}</p>
-                                    ${device.proxy ? `<p class="text-muted small mb-0">Proxy: ${device.proxy}</p>` : ""}
-                                </div>
+                row.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center flex-wrap">
+                        <div class="device-info">
+                            <div class="d-flex align-items-center gap-3 mb-2">
+                                <h5 class="mb-0">${device.name || device.device}</h5>
                                 <span class="status-badge ${statusClass}">
                                     ${statusClass === "loading" ? "No Data" : statusClass === "pass" ? "Passed" : "Failed"}
                                 </span>
                             </div>
-
+                            <div class="text-muted small mb-2">
+                                Device: <code>${device.device}</code>
+                                ${device.proxy ? ` • Proxy: ${device.proxy}` : ""}
+                            </div>
+                        </div>
+                        <div class="device-stats">
                             ${testSummary}
-
                             <div class="d-flex gap-2">
-                                <button class="btn btn-sm btn-outline-primary flex-fill"
-                                        onclick="showTestDetails(${index})"
+                                <button class="btn btn-sm btn-outline-primary"
+                                        onclick="showTestDetails(${originalIndex})"
                                         ${!report ? "disabled" : ""}>
-                                    <i class="bi bi-list-check"></i> Test Details
+                                    <i class="bi bi-list-check"></i> Details
                                 </button>
-                                <button class="btn btn-sm btn-outline-secondary flex-fill"
-                                        onclick="showBootLog(${index})">
+                                <button class="btn btn-sm btn-outline-secondary"
+                                        onclick="showBootLog(${originalIndex})">
                                     <i class="bi bi-terminal"></i> Boot Log
                                 </button>
                             </div>
                         </div>
                     </div>
-                </div>
-            `;
+                `;
+
+                return row;
             }
 
             async function showTestDetails(deviceIndex) {
