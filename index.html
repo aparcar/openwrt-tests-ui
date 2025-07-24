@@ -3,7 +3,7 @@
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>OpenWRT Test Dashboard</title>
+        <title>OpenWrt Test Dashboard - Remote Data</title>
 
         <!-- Bootstrap CSS -->
         <link
@@ -229,16 +229,36 @@
         <nav class="navbar navbar-dark">
             <div class="container-fluid">
                 <span class="navbar-brand mb-0 h1">
-                    <i class="bi bi-router"></i> OpenWRT Test Dashboard
+                    <i class="bi bi-router"></i> OpenWrt Test Dashboard
                 </span>
-                <button class="btn btn-light btn-sm" onclick="loadDevices()">
-                    <i class="bi bi-arrow-clockwise"></i> Refresh
-                </button>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="text-white-50 small">
+                        <i class="bi bi-cloud-download"></i> Data from:
+                        <code class="text-white"
+                            >aparcar.org/openwrt-tests</code
+                        >
+                    </span>
+                    <button
+                        class="btn btn-light btn-sm"
+                        onclick="loadDevices()"
+                    >
+                        <i class="bi bi-arrow-clockwise"></i> Refresh
+                    </button>
+                </div>
             </div>
         </nav>
 
         <!-- Main Container -->
         <div class="container-fluid mt-4">
+            <!-- Last Update Info -->
+            <div class="row mb-3">
+                <div class="col-12 text-center">
+                    <small class="text-muted" id="last-update">
+                        <!-- Last update time will be shown here -->
+                    </small>
+                </div>
+            </div>
+
             <!-- Statistics Row -->
             <div class="row mb-4" id="stats-container">
                 <!-- Stats will be loaded here -->
@@ -287,6 +307,13 @@
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
 
         <script>
+            // Configuration
+            const BASE_URL = "https://aparcar.org/openwrt-tests";
+
+            // Note: This page loads data from aparcar.org/openwrt-tests
+            // The remote server must have appropriate CORS headers configured
+            // to allow cross-origin requests from this domain
+
             // Global storage for device data
             let devicesData = [];
 
@@ -308,24 +335,30 @@
                     </div>
                 `;
 
-                    // Load devices.json
-                    const response = await fetch("data/devices.json");
+                    // Load devices.json from remote URL
+                    const response = await fetch(`${BASE_URL}/devices.json`);
                     if (!response.ok) {
-                        throw new Error("Failed to load devices.json");
+                        throw new Error(
+                            `Failed to load devices.json: ${response.status} ${response.statusText}`,
+                        );
                     }
 
-                    const data = await response.json();
-                    devicesData = data.devices;
+                    devicesData = await response.json();
 
                     // Load data for each device
                     const devicePromises = devicesData.map(async (device) => {
-                        const devicePath = `data/${device.lab}-${device.device}`;
-
                         try {
-                            // Load report.xml
+                            // Load report_{device}.xml from remote URL
                             const reportResponse = await fetch(
-                                `${devicePath}/report.xml`,
+                                `${BASE_URL}/data/results-${device.device}/report.xml`,
                             );
+                            if (!reportResponse.ok) {
+                                console.warn(
+                                    `Report not available for ${device.device}`,
+                                );
+                                device.report = null;
+                                return device;
+                            }
                             const reportText = await reportResponse.text();
                             device.report = parseTestReport(reportText);
                         } catch (error) {
@@ -335,7 +368,6 @@
                             );
                             device.report = null;
                         }
-
                         return device;
                     });
 
@@ -344,11 +376,19 @@
                     // Update UI
                     updateStats();
                     renderDevices();
+                    updateLastRefreshTime();
                 } catch (error) {
                     console.error("Error loading devices:", error);
-                    showError(
-                        "Failed to load device data. Please ensure devices.json is accessible.",
-                    );
+                    let errorMessage = `Failed to load device data from ${BASE_URL}. `;
+
+                    if (error.message.includes("Failed to fetch")) {
+                        errorMessage +=
+                            "This might be a CORS issue. Make sure the server allows cross-origin requests, or there might be a network connectivity problem.";
+                    } else {
+                        errorMessage += `Error: ${error.message}`;
+                    }
+
+                    showError(errorMessage);
                 }
             }
 
@@ -494,19 +534,35 @@
                 const container = document.getElementById("device-container");
                 container.innerHTML = "";
 
+                if (devicesData.length === 0) {
+                    container.innerHTML = `
+                        <div class="col-12 text-center py-5">
+                            <i class="bi bi-inbox fs-1 text-muted"></i>
+                            <p class="mt-2 text-muted">No devices found</p>
+                        </div>
+                    `;
+                    return;
+                }
+
                 devicesData.forEach((device, index) => {
                     const card = createDeviceCard(device, index);
-                    container.innerHTML += card;
+                    if (card != undefined) {
+                        container.innerHTML += card;
+                    }
                 });
             }
 
             function createDeviceCard(device, index) {
+                // Show all devices, even those without reports
                 const report = device.report;
-                const statusClass =
-                    report.failures + report.errors == 0 ? "pass" : "failures";
-                const displayName =
-                    device.name ||
-                    device.device.replace(/_/g, " ").replace(/-/g, " ");
+                let statusClass = "loading";
+
+                if (report) {
+                    statusClass =
+                        report.failures + report.errors == 0
+                            ? "pass"
+                            : "failures";
+                }
 
                 let testSummary = "";
                 if (report) {
@@ -535,7 +591,10 @@
                 } else {
                     testSummary = `
                     <div class="mb-3">
-                        <p class="text-muted small mb-0">No test results available</p>
+                        <p class="text-muted small mb-0">
+                            <i class="bi bi-hourglass-split"></i> No test results available
+                        </p>
+                        <small class="text-muted">Test data might not have been uploaded yet</small>
                     </div>
                 `;
                 }
@@ -546,10 +605,13 @@
                         <div class="card-body">
                             <div class="d-flex justify-content-between align-items-start mb-3">
                                 <div>
-                                    <h5 class="card-title mb-1">${displayName}</h5>
-                                    <p class="text-muted small mb-0">${device.device}</p>
-                                    <p class="text-muted small mb-0">${device.lab}</p>
+                                    <h5 class="card-title mb-1">${device.name || device.device}</h5>
+                                    <p class="text-muted small mb-0">Device: ${device.device}</p>
+                                    ${device.proxy ? `<p class="text-muted small mb-0">Proxy: ${device.proxy}</p>` : ""}
                                 </div>
+                                <span class="status-badge ${statusClass}">
+                                    ${statusClass === "loading" ? "No Data" : statusClass === "pass" ? "Passed" : "Failed"}
+                                </span>
                             </div>
 
                             ${testSummary}
@@ -613,7 +675,7 @@
                                 ${test.status}
                             </span>
                         </td>
-                        <td>${test.message ? `<small class="text-muted">${test.message}</small>` : ""}</td>
+                        <td>${test.message ? `<small class="text-muted">${escapeHtml(test.message)}</small>` : ""}</td>
                     </tr>
                 `;
                 });
@@ -676,11 +738,14 @@
                 modal.show();
 
                 try {
-                    const devicePath = `data/${device.lab}-${device.device}`;
-                    const response = await fetch(`${devicePath}/boot.log`);
+                    const response = await fetch(
+                        `${BASE_URL}/data/results-${device.device}/console_main`,
+                    );
 
                     if (!response.ok) {
-                        throw new Error("Failed to load boot log");
+                        throw new Error(
+                            `Failed to load boot log: ${response.status} ${response.statusText}`,
+                        );
                     }
 
                     const logContent = await response.text();
@@ -696,9 +761,18 @@
                 `;
                 } catch (error) {
                     console.error("Error loading boot log:", error);
+                    let errorMessage = "Failed to load boot log: ";
+
+                    if (error.message.includes("Failed to fetch")) {
+                        errorMessage +=
+                            "Network or CORS error. The server might not allow cross-origin requests.";
+                    } else {
+                        errorMessage += error.message;
+                    }
+
                     document.getElementById("modal-content").innerHTML = `
                     <div class="alert alert-danger">
-                        Failed to load boot log: ${error.message}
+                        ${errorMessage}
                     </div>
                 `;
                 }
@@ -733,8 +807,21 @@
                 document.getElementById("error-container").innerHTML = `
                 <div class="error-message">
                     <i class="bi bi-exclamation-triangle-fill"></i> ${message}
+                    <div class="mt-2 small">
+                        <strong>Note:</strong> This page is loading data from <code>${BASE_URL}</code>.
+                        If you're running this locally, make sure the remote server has CORS headers configured to allow requests from your origin.
+                    </div>
                 </div>
             `;
+            }
+
+            function updateLastRefreshTime() {
+                const now = new Date();
+                const timeString = now.toLocaleTimeString();
+                const dateString = now.toLocaleDateString();
+                document.getElementById("last-update").innerHTML = `
+                    <i class="bi bi-clock-history"></i> Last refreshed: ${dateString} at ${timeString}
+                `;
             }
         </script>
     </body>
