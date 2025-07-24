@@ -244,6 +244,14 @@
                 flex: 1;
             }
 
+            .firmware-version {
+                background-color: #f8f9fa;
+                padding: 0.25rem 0.5rem;
+                border-radius: 4px;
+                font-family: monospace;
+                font-size: 0.875rem;
+            }
+
             .device-stats {
                 display: flex;
                 gap: 1rem;
@@ -511,6 +519,15 @@
                     testcases: [],
                 };
 
+                // Try to find firmware version in properties
+                const properties = xmlDoc.querySelectorAll("property");
+                properties.forEach((property) => {
+                    if (property.getAttribute("name") === "firmware_version") {
+                        report.firmware_version =
+                            property.getAttribute("value");
+                    }
+                });
+
                 // Calculate passed tests
                 report.passed =
                     report.tests -
@@ -705,7 +722,7 @@
                 let testSummary = "";
                 if (report) {
                     testSummary = `
-                        <div class="d-flex gap-3">
+                        <div class="d-flex gap-3 align-items-center">
                             <span class="badge bg-light text-dark">
                                 <span class="test-indicator passed"></span>
                                 ${report.passed} passed
@@ -722,6 +739,7 @@
                                 <i class="bi bi-clock"></i> ${report.time.toFixed(2)}s
                             </span>
                         </div>
+                        ${report.firmware_version ? `<div class="mt-1"><span class="firmware-version"><i class="bi bi-code-slash"></i> ${report.firmware_version}</span></div>` : ""}
                     `;
                 } else {
                     testSummary = `
@@ -833,6 +851,7 @@
                         <strong>Duration:</strong> ${report.time.toFixed(2)} seconds
                     </div>
                     ${report.timestamp ? `<div><strong>Timestamp:</strong> ${new Date(report.timestamp).toLocaleString()}</div>` : ""}
+                    ${report.firmware_version ? `<div><strong>Firmware Version:</strong> ${report.firmware_version}</div>` : ""}
                 </div>
 
                 <div class="table-responsive">
