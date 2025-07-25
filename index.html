@@ -52,6 +52,21 @@
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
             }
 
+            .navbar a {
+                color: rgba(255, 255, 255, 0.9);
+                text-decoration: none;
+                transition: color 0.2s ease;
+            }
+
+            .navbar a:hover {
+                color: white;
+                text-decoration: none;
+            }
+
+            .navbar .text-white-50 {
+                color: rgba(255, 255, 255, 0.7) !important;
+            }
+
             .device-row {
                 background: white;
                 border: 1px solid #e9ecef;
@@ -366,12 +381,17 @@
                     <i class="bi bi-router"></i> OpenWrt Test Dashboard
                 </span>
                 <div class="d-flex align-items-center gap-3">
-                    <span class="text-white-50 small">
-                        <i class="bi bi-cloud-download"></i> Data from:
-                        <code class="text-white"
-                            >aparcar.org/openwrt-tests</code
+                    <a
+                        href="https://github.com/aparcar/openwrt-tests"
+                        target="_blank"
+                        class="text-white-50 small d-flex align-items-center gap-2"
+                    >
+                        <i class="bi bi-cloud-download"></i>
+                        <span
+                            >Data from:
+                            <code>github.com/aparcar/openwrt-tests</code></span
                         >
-                    </span>
+                    </a>
                     <button
                         class="btn btn-light btn-sm"
                         onclick="loadDevices()"
