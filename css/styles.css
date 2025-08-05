@@ -1,0 +1,495 @@
+/* Shared CSS styles for OpenWrt Test Dashboard */
+
+:root {
+    --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    --success-gradient: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
+    --warning-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+    --danger-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+    --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.08);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.1);
+    --shadow-lg: 0 8px 25px rgba(0, 0, 0, 0.15);
+    --border-radius: 8px;
+    --border-radius-lg: 12px;
+    --transition: all 0.2s ease;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+    line-height: 1.6;
+}
+
+/* Navigation */
+.navbar {
+    background: var(--primary-gradient);
+    box-shadow: var(--shadow-sm);
+}
+
+.navbar a {
+    color: rgba(255, 255, 255, 0.9);
+    text-decoration: none;
+    transition: var(--transition);
+}
+
+.navbar a:hover {
+    color: white;
+    text-decoration: none;
+}
+
+.navbar .text-white-50 {
+    color: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Device rows */
+.device-row {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: var(--border-radius);
+    margin-bottom: 8px;
+    padding: 16px;
+    transition: var(--transition);
+}
+
+.device-row:hover {
+    box-shadow: var(--shadow-md);
+    transform: translateX(4px);
+}
+
+.device-row.status-pass {
+    border-left: 4px solid #28a745;
+}
+
+.device-row.status-failures {
+    border-left: 4px solid #dc3545;
+}
+
+.device-row.status-loading {
+    border-left: 4px solid #6c757d;
+}
+
+/* Status badges */
+.status-badge {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 50px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.status-badge.pass {
+    background: var(--success-gradient);
+    color: white;
+}
+
+.status-badge.failures {
+    background: var(--danger-gradient);
+    color: white;
+}
+
+.status-badge.loading {
+    background: #6c757d;
+    color: white;
+}
+
+/* Test indicators */
+.test-indicator {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-right: 4px;
+}
+
+.test-indicator.passed {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.test-indicator.skipped {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.test-indicator.failed {
+    background-color: #f8d7da;
+    color: #721c24;
+}
+
+.test-indicator.error {
+    background-color: #f5c6cb;
+    color: #721c24;
+}
+
+/* Statistics cards */
+.stats-card {
+    border: none;
+    border-radius: var(--border-radius);
+    transition: var(--transition);
+    overflow: hidden;
+}
+
+.stats-card:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.stats-card.total {
+    background: var(--primary-gradient);
+    color: white;
+}
+
+.stats-card.passed {
+    background: var(--success-gradient);
+    color: white;
+}
+
+.stats-card.skipped {
+    background: var(--warning-gradient);
+    color: white;
+}
+
+.stats-card.failed {
+    background: var(--danger-gradient);
+    color: white;
+}
+
+/* Log viewer */
+.log-viewer {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    max-height: 500px;
+    overflow-y: auto;
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+.log-viewer pre {
+    margin: 0;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Loading spinner */
+.loading-spinner {
+    border: 4px solid #f3f4f6;
+    border-top: 4px solid #667eea;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    animation: spin 1s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Modal customizations */
+.modal-content {
+    border: none;
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+}
+
+.modal-header {
+    background: var(--primary-gradient);
+    color: white;
+    border-radius: var(--border-radius-lg) var(--border-radius-lg) 0 0;
+}
+
+/* Test results table */
+.test-results-table {
+    font-size: 0.875rem;
+}
+
+.test-results-table td {
+    vertical-align: middle;
+}
+
+/* Error message */
+.error-message {
+    text-align: center;
+    padding: 2rem;
+    color: #dc3545;
+}
+
+.error-message i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+/* Button customizations */
+.btn-close-white {
+    filter: invert(1) grayscale(100%) brightness(200%);
+}
+
+/* Search container */
+.search-container {
+    background: white;
+    border-radius: var(--border-radius);
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Filter badge */
+.filter-badge {
+    background-color: #e9ecef;
+    color: #495057;
+    padding: 0.25rem 0.75rem;
+    border-radius: 50px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    margin-left: 0.5rem;
+}
+
+/* Test message */
+.test-message {
+    max-width: 300px;
+    overflow-wrap: break-word;
+}
+
+.test-message.has-ansi {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    background-color: #f8f9fa;
+    padding: 0.25rem;
+    border-radius: 4px;
+}
+
+/* Device info */
+.device-info {
+    font-size: 0.875rem;
+}
+
+/* Firmware version */
+.firmware-version {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.8rem;
+    background-color: #f8f9fa;
+    padding: 0.125rem 0.25rem;
+    border-radius: 4px;
+}
+
+.firmware-version a {
+    color: #007bff;
+    text-decoration: none;
+}
+
+.firmware-version a:hover {
+    color: #0056b3;
+    text-decoration: underline;
+}
+
+/* ANSI color codes */
+.ansi-black { color: #000000; }
+.ansi-red { color: #cd3131; }
+.ansi-green { color: #0dbc79; }
+.ansi-yellow { color: #e5e510; }
+.ansi-blue { color: #2472c8; }
+.ansi-magenta { color: #bc3fbc; }
+.ansi-cyan { color: #11a8cd; }
+.ansi-white { color: #e5e5e5; }
+.ansi-bright-black { color: #666666; }
+.ansi-bright-red { color: #f14c4c; }
+.ansi-bright-green { color: #23d18b; }
+.ansi-bright-yellow { color: #f5f543; }
+.ansi-bright-blue { color: #3b8eea; }
+.ansi-bright-magenta { color: #d670d6; }
+.ansi-bright-cyan { color: #29b8db; }
+.ansi-bright-white { color: #e5e5e5; }
+.ansi-bold { font-weight: bold; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+
+/* Device stats */
+.device-stats {
+    font-size: 0.875rem;
+    line-height: 1.4;
+}
+
+/* Version cards (for overview page) */
+.version-card {
+    background: white;
+    border: 1px solid #e9ecef;
+    border-radius: var(--border-radius-lg);
+    padding: 24px;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    height: 100%;
+}
+
+.version-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    text-decoration: none;
+    color: inherit;
+}
+
+.version-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: var(--border-radius-lg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 16px;
+    font-size: 24px;
+    color: white;
+}
+
+.version-icon.snapshot {
+    background: var(--warning-gradient);
+}
+
+.version-icon.stable {
+    background: var(--success-gradient);
+}
+
+.version-icon.oldstable {
+    background: var(--primary-gradient);
+}
+
+.version-title {
+    font-size: 1.25rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #212529;
+}
+
+.version-description {
+    color: #6c757d;
+    margin-bottom: 0;
+    line-height: 1.5;
+}
+
+/* Hero section */
+.hero-section {
+    background: var(--primary-gradient);
+    color: white;
+    padding: 4rem 0;
+    margin-bottom: 3rem;
+}
+
+.hero-title {
+    font-size: 3rem;
+    font-weight: 700;
+    margin-bottom: 1rem;
+}
+
+.hero-subtitle {
+    font-size: 1.25rem;
+    opacity: 0.9;
+    margin-bottom: 0;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .device-row {
+        padding: 12px;
+    }
+
+    .device-stats {
+        margin-top: 8px;
+        font-size: 0.8rem;
+    }
+
+    .hero-title {
+        font-size: 2rem;
+    }
+
+    .hero-subtitle {
+        font-size: 1rem;
+    }
+
+    .search-container {
+        padding: 0.75rem;
+    }
+
+    .version-card {
+        padding: 20px;
+    }
+
+    .version-icon {
+        width: 50px;
+        height: 50px;
+        font-size: 20px;
+    }
+}
+
+/* Utility classes */
+.text-gradient-primary {
+    background: var(--primary-gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+}
+
+.bg-gradient-primary {
+    background: var(--primary-gradient);
+}
+
+.bg-gradient-success {
+    background: var(--success-gradient);
+}
+
+.bg-gradient-warning {
+    background: var(--warning-gradient);
+}
+
+.bg-gradient-danger {
+    background: var(--danger-gradient);
+}
+
+/* Scrollbar styling */
+.log-viewer::-webkit-scrollbar {
+    width: 8px;
+}
+
+.log-viewer::-webkit-scrollbar-track {
+    background: #2d2d2d;
+}
+
+.log-viewer::-webkit-scrollbar-thumb {
+    background: #666;
+    border-radius: 4px;
+}
+
+.log-viewer::-webkit-scrollbar-thumb:hover {
+    background: #888;
+}
+
+/* Focus states for accessibility */
+.btn:focus,
+.form-control:focus,
+.btn-check:focus + .btn {
+    box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+}
+
+/* Print styles */
+@media print {
+    .navbar,
+    .search-container,
+    .btn,
+    .modal {
+        display: none !important;
+    }
+
+    .device-row {
+        break-inside: avoid;
+        box-shadow: none;
+        border: 1px solid #ddd;
+    }
+
+    body {
+        background: white;
+    }
+}
