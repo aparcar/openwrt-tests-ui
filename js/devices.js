@@ -377,6 +377,9 @@ class DeviceManager {
                             <button class="btn btn-outline-secondary" onclick="deviceManager.showBootLog('${device.device}')">
                                 <i class="bi bi-terminal"></i> Boot Log
                             </button>
+                            <button class="btn btn-outline-success" onclick="deviceManager.downloadEnv('${device.device}')">
+                                <i class="bi bi-download"></i> Env
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -581,6 +584,48 @@ class DeviceManager {
                 </div>
             `;
     }
+  }
+
+  /**
+   * Generate environment file content for a device
+   */
+  generateEnvContent(device) {
+    // Default values (as requested)
+    const env = {
+      LG_IMAGE: device.firmware,
+      LG_PLACE: `${device.proxy}-${device.device}`,
+      LG_PROXY: device.proxy,
+      LG_ENV: `targets/${device.device}.yaml`,
+    };
+
+    // Build env file content (export lines)
+    const lines = Object.keys(env).map((k) => `export ${k}=${env[k]}`);
+    return lines.join("\n") + "\n";
+  }
+
+  /**
+   * Download prefilled env file for a device
+   */
+  downloadEnv(deviceId) {
+    const device = this.devicesData.find((d) => d.device === deviceId);
+    if (!device) {
+      console.warn(`Device not found: ${deviceId}`);
+      return;
+    }
+
+    const content = this.generateEnvContent(device);
+    const filename = `${device.proxy}-${device.device}.env`;
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    // Append to DOM to make click work in some browsers
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   }
 
   /**
