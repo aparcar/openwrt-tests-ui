@@ -1,0 +1,9 @@
+{
+  "labs": {
+    "aparcar-lab": {
+      "description": "Hardware in Paul's lab",
+      "maintainer": "aparcar",
+      "url": "https://github.com/aparcar"
+    }
+  }
+}

@@ -1,0 +1,419 @@
+// Pure data model: Maestro nodes -> runs, lanes, statuses. No DOM, no fetch,
+// so it can be unit tested with `node --test`.
+
+// One run = one job node (kind=job) created by the scheduler and completed by
+// a lab's labgrid-agent. Job data carries everything the overview needs:
+//   data.platform, data.runtime (lab), data.device, data.kernel_revision
+//   (branch, describe, commit, commit_tags), data.summary (agent >= 2026-10),
+//   artifacts.{test_log,pytest_log,junit}
+export function toRun(job) {
+  const data = job.data || {};
+  // Our fields are in data.misc (deploy/DATA.md); data.openwrt, data.pool
+  // etc. are from before (Maestro drops them when a lab updates the job)
+  const ow = data.misc?.openwrt || data.openwrt || {};
+  const rev = data.kernel_revision || {};
+  const isRelease = (rev.commit_tags || []).length > 0;
+  return {
+    id: job.id,
+    parent: job.parent,
+    name: job.name,
+    platform: data.platform,
+    lab: data.runtime,
+    // who created the run (Maestro sets it), and why: title/url (owci)
+    owner: job.owner || null,
+    trigger: data.misc?.trigger || {},
+    // set when a lab claimed the job from the shared pool (see inventory)
+    pool: data.misc?.pool || data.pool || null,
+    // the scheduler copies the device's name and features from its target
+    // file (older jobs: none, the platform stands in)
+    deviceName: ow.name || null,
+    // SNAPSHOT, 25.12-SNAPSHOT, 25.12.6 or custom (scheduler, openwrtci)
+    release: ow.release || releaseOf(rev.branch, rev.commit_tags),
+    target: ow.target || null,
+    profile: ow.profile || null,
+    features: ow.features || null,
+    device: data.device,
+    state: job.state,
+    result: job.result,
+    claimed: Boolean(data.job_id),
+    created: job.created,
+    updated: job.updated,
+    // Maestro closes the job as incomplete after this (no lab finished it)
+    timeout: job.timeout,
+    branch: rev.branch || "unknown",
+    describe: rev.describe || rev.commit?.slice(0, 10) || "unknown",
+    commit: rev.commit,
+    isRelease,
+    lane: laneKey(rev.branch || "unknown", isRelease),
+    // in data.misc since Maestro drops unknown data fields on update
+    summary: data.misc?.summary || data.summary || null,
+    durationMs: data.misc?.duration_ms ?? data.duration_ms ?? null,
+    errorCode: data.error_code || null,
+    errorMsg: data.error_msg || null,
+    artifacts: job.artifacts || {},
+  };
+}
+
+// Older jobs have no data.openwrt.release: main -> SNAPSHOT, a release tag
+// v25.12.6 -> 25.12.6, other openwrt-25.12 builds -> 25.12-SNAPSHOT
+export function releaseOf(branch, tags = []) {
+  const tag = (tags || []).find((t) => /^v\d+\.\d+\.\d+/.test(t));
+  if (tag) return tag.slice(1);
+  if (branch === "main") return "SNAPSHOT";
+  const m = (branch || "").match(/^openwrt-(\d+\.\d+)$/);
+  return m ? `${m[1]}-SNAPSHOT` : null;
+}
+
+// --- status ------------------------------------------------------------------
+
+// queued: waiting for a lab; running: claimed; else the job result
+export function status(run) {
+  if (run.state !== "done") return run.claimed ? "running" : "queued";
+  return run.result || "incomplete";
+}
+
+export const STATUS = {
+  pass: { label: "Passed", icon: "✓", rank: 1 },
+  fail: { label: "Failed", icon: "✕", rank: 4 },
+  incomplete: { label: "Incomplete", icon: "!", rank: 3 },
+  skip: { label: "Skipped", icon: "–", rank: 0 },
+  running: { label: "Running", icon: "◷", rank: 2 },
+  queued: { label: "Queued", icon: "…", rank: 2 },
+  none: { label: "No run", icon: "", rank: -1 },
+};
+
+// --- official and manual runs --------------------------------------------------
+
+// Official runs: created by the nightly schedule's user (config.official,
+// e.g. ["ci"]). Everything else was triggered by hand (owci). Without the
+// setting every run counts as official.
+export function isOfficial(run, official) {
+  return !official || official.includes(run.owner);
+}
+
+// Links from run triggers come from whoever ran owci: only http(s) ones
+// become links (no javascript: and the like)
+export function safeUrl(url) {
+  return typeof url === "string" && /^https?:\/\//i.test(url) ? url : null;
+}
+
+// --- inventory: devices and labs from the runs themselves ---------------------
+
+// No configuration needed: each job names its device (data.platform plus
+// data.openwrt name/target/profile/features) and, once claimed, its lab
+// (data.runtime). Unclaimed jobs sit in the shared pool's runtime; jobs a lab
+// took from the pool remember it in data.pool, so the pool is not a lab.
+// labsInfo (optional data/labs.json) adds description/maintainer/url per lab
+// and lists labs that have not run anything yet; knownPools (config.pool)
+// covers a pool nothing was claimed from yet.
+export function inventory(runs, labsInfo = {}, knownPools = []) {
+  const pools = new Set([...knownPools, ...runs.map((r) => r.pool)].filter(Boolean));
+  const devices = new Map();
+  const labs = new Map();
+  const addLab = (name) => {
+    if (!labs.has(name)) labs.set(name, { name, ...(labsInfo[name] || {}), platforms: new Set() });
+    return labs.get(name);
+  };
+  Object.keys(labsInfo).forEach(addLab);
+  for (const run of [...runs].sort(byNewest)) {
+    if (!run.platform) continue;
+    // newest first: the latest job's device details win; jobs without them
+    // (scheduled before, or finished before they moved to data.misc) take
+    // them from any other run
+    if (!devices.has(run.platform)) {
+      devices.set(run.platform, { platform: run.platform, name: null, target: null, profile: null,
+        features: null, labs: new Set() });
+    }
+    const d = devices.get(run.platform);
+    d.name ??= run.deviceName;
+    d.target ??= run.target;
+    d.profile ??= run.profile;
+    d.features ??= run.features;
+    const lab = labOf(run, pools);
+    if (lab) {
+      addLab(lab).platforms.add(run.platform);
+      devices.get(run.platform).labs.add(lab);
+    }
+  }
+  for (const d of devices.values()) {
+    d.name ??= d.platform;
+    d.features ??= [];
+  }
+  return { devices, labs, pools };
+}
+
+// The lab that ran (or is running) a job; null while it waits in the pool
+export function labOf(run, pools) {
+  return run.lab && !pools.has(run.lab) ? run.lab : null;
+}
+
+// --- queue -----------------------------------------------------------------------
+
+// Unfinished jobs (state != done): running ones (claimed by a lab), and the
+// waiting ones grouped by device, oldest first. A waiting device no lab ran
+// recently (inv.devices[...].labs empty) likely times out unrun.
+export function queue(runs, inv) {
+  const running = [];
+  const waiting = new Map();
+  for (const run of [...runs].sort((a, b) => (a.created || "").localeCompare(b.created || ""))) {
+    if (run.state === "done") continue;
+    if (run.claimed) {
+      running.push(run);
+      continue;
+    }
+    if (!waiting.has(run.platform)) {
+      const labs = inv.devices.get(run.platform)?.labs || new Set();
+      waiting.set(run.platform, { platform: run.platform, runs: [], noLab: labs.size === 0 });
+    }
+    waiting.get(run.platform).runs.push(run);
+  }
+  // devices nobody can run first, then the longest waiting
+  const groups = [...waiting.values()].sort((a, b) =>
+    (b.noLab - a.noLab) || (a.runs[0].created || "").localeCompare(b.runs[0].created || ""));
+  return { running, waiting: groups, total: running.length + groups.reduce((n, g) => n + g.runs.length, 0) };
+}
+
+// --- lanes: one matrix column per branch and kind ----------------------------
+
+export function laneKey(branch, isRelease) {
+  return `${branch}:${isRelease ? "release" : "snapshot"}`;
+}
+
+export function laneLabel(lane) {
+  const [branch, kind] = lane.split(":");
+  const name = branch === "main" ? "main" : branch.replace(/^openwrt-/, "");
+  return { name, kind: kind === "release" ? "Release" : "Snapshot" };
+}
+
+// "main" > "openwrt-25.12" > "openwrt-24.10"
+function branchRank(branch) {
+  if (branch === "main") return [Infinity];
+  const m = branch.match(/(\d+)\.(\d+)/);
+  return m ? [Number(m[1]), Number(m[2])] : [-1];
+}
+
+export function compareLanes(a, b) {
+  const [ba, ka] = a.split(":");
+  const [bb, kb] = b.split(":");
+  const ra = branchRank(ba);
+  const rb = branchRank(bb);
+  for (let i = 0; i < Math.max(ra.length, rb.length); i++) {
+    const d = (rb[i] ?? 0) - (ra[i] ?? 0);
+    if (d) return d;
+  }
+  // per branch: snapshot first, then release
+  return ka === kb ? 0 : ka === "snapshot" ? -1 : 1;
+}
+
+export function byNewest(a, b) {
+  return (b.created || "").localeCompare(a.created || "");
+}
+
+// Map lane -> runs (newest first)
+export function groupByLane(runs) {
+  const lanes = new Map();
+  for (const run of [...runs].sort(byNewest)) {
+    if (!lanes.has(run.lane)) lanes.set(run.lane, []);
+    lanes.get(run.lane).push(run);
+  }
+  return lanes;
+}
+
+// The cell of the matrix: latest run of a lane, plus whether it is a new
+// failure (previous finished run in the same lane passed)
+export function laneCell(laneRuns) {
+  if (!laneRuns || laneRuns.length === 0) return null;
+  const latest = laneRuns[0];
+  const previous = laneRuns.slice(1).find((r) => r.state === "done");
+  const st = status(latest);
+  return {
+    run: latest,
+    status: st,
+    newFailure: (st === "fail" || st === "incomplete") && previous ? status(previous) === "pass" : false,
+  };
+}
+
+// Worst status among cells, for sorting and filtering devices
+export function worstStatus(cells) {
+  let worst = "none";
+  for (const cell of cells) {
+    if (cell && STATUS[cell.status].rank > STATUS[worst].rank) worst = cell.status;
+  }
+  return worst;
+}
+
+// --- tests -------------------------------------------------------------------
+
+// modules: child nodes of the job; testsByModule: module id -> its children
+export function testTree(modules, testsByModule) {
+  return modules
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      result: m.result,
+      tests: (testsByModule[m.id] || [])
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          result: t.result,
+          durationMs: t.data?.misc?.duration_ms ?? t.data?.duration_ms ?? null,
+          errorMsg: t.data?.error_msg || null,
+          // its own log (agent: one log per test); older runs have none
+          logUrl: t.artifacts?.test_log || null,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function summarize(tree) {
+  const s = { total: 0, passed: 0, failed: 0, skipped: 0, errors: 0 };
+  for (const m of tree) {
+    for (const t of m.tests) {
+      s.total++;
+      if (t.result === "pass") s.passed++;
+      else if (t.result === "fail") s.failed++;
+      else if (t.result === "skip") s.skipped++;
+      else s.errors++;
+    }
+  }
+  return s;
+}
+
+// --- logs ----------------------------------------------------------------------
+
+// A per-test log (agent: pytest junit_logging=all) or console log, line by
+// line. Console lines come as "CONSOLE    SerialDriver: <text>": shown as
+// the device printed them. kind: console, log, error, section or plain.
+export function logLines(text) {
+  return (text || "").replace(/\r/g, "")
+    // terminal escape codes (colours, cursor movement) from the serial console
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b[()][0-9A-B]|\x1b[=>78]/g, "")
+    .replace(/\n+$/, "").split("\n").map((line) => {
+    const consoleLine = line.match(/^CONSOLE\s+[\w.]+: ?(.*)$/);
+    if (consoleLine) return { kind: "console", text: consoleLine[1] };
+    if (/^-{5,} .* -{5,}$/.test(line)) return { kind: "section", text: line.replace(/^-+ | -+$/g, "") };
+    if (/^(ERROR|CRITICAL)\s/.test(line) || /^E\s{2,}/.test(line) || /^Traceback /.test(line)) {
+      return { kind: "error", text: line };
+    }
+    if (/^(DEBUG|INFO|WARNING)\s/.test(line)) return { kind: "log", text: line };
+    return { kind: "plain", text: line };
+  });
+}
+
+// --- labs ----------------------------------------------------------------------
+
+// Recent runs of a lab -> counts per status and the last activity
+export function labStats(runs) {
+  const counts = { pass: 0, fail: 0, incomplete: 0, skip: 0, running: 0, queued: 0 };
+  let last = null;
+  for (const run of runs) {
+    counts[status(run)]++;
+    const t = run.updated || run.created;
+    if (t && (!last || t > last)) last = t;
+  }
+  const finished = counts.pass + counts.fail + counts.incomplete + counts.skip;
+  return { counts, last, finished, infraRate: finished ? counts.incomplete / finished : 0 };
+}
+
+// --- target coverage -------------------------------------------------------------
+
+// Which OpenWrt targets have a device in the recent runs. targets
+// (config.targets): "ath79/generic" -> "mips_24kc"; devices: inventory
+// devices (d.target "ath79/generic"). One entry per main target with its
+// subtargets and the devices on each; targets only the runs know (not in
+// config.targets) are listed too, with arch null. Devices without a
+// target (older jobs) are returned as unknown.
+export function targetCoverage(targets = {}, devices = []) {
+  const subtargets = new Map(Object.entries(targets).map(([t, arch]) => [t, { name: t, arch, devices: [] }]));
+  const unknown = [];
+  for (const d of devices) {
+    if (!d.target) {
+      unknown.push(d);
+      continue;
+    }
+    if (!subtargets.has(d.target)) subtargets.set(d.target, { name: d.target, arch: null, devices: [], extra: true });
+    subtargets.get(d.target).devices.push(d);
+  }
+  const mains = new Map();
+  for (const sub of subtargets.values()) {
+    const main = sub.name.split("/")[0];
+    if (!mains.has(main)) mains.set(main, { name: main, subtargets: [], devices: [] });
+    sub.devices.sort((a, b) => a.name.localeCompare(b.name));
+    mains.get(main).subtargets.push(sub);
+    mains.get(main).devices.push(...sub.devices);
+  }
+  const list = [...mains.values()].map((m) => ({
+    ...m,
+    subtargets: m.subtargets.sort((a, b) => a.name.localeCompare(b.name)),
+    arches: [...new Set(m.subtargets.map((s) => s.arch).filter(Boolean))].sort(),
+    covered: m.devices.length > 0,
+  })).sort((a, b) => a.name.localeCompare(b.name));
+  // an architecture counts as covered if any device runs on it
+  const coveredArches = new Set(list.flatMap((m) => m.subtargets.filter((s) => s.devices.length).map((s) => s.arch))
+    .filter(Boolean));
+  const allArches = new Set(Object.values(targets));
+  return {
+    targets: list,
+    unknown,
+    coveredArches,
+    summary: {
+      targets: list.length,
+      covered: list.filter((m) => m.covered).length,
+      subtargets: subtargets.size,
+      coveredSubtargets: [...subtargets.values()].filter((s) => s.devices.length).length,
+      arches: allArches.size,
+      coveredArches: [...coveredArches].filter((a) => allArches.has(a)).length,
+    },
+  };
+}
+
+// --- scheduling ------------------------------------------------------------------
+
+// The official builds to offer for a device: the main snapshot, then those
+// its runs used (branch snapshots, then releases, newest first)
+export function releasesOf(runs) {
+  const seen = new Set(runs.map((r) => r.release).filter((r) => r && r !== "custom"));
+  seen.add("SNAPSHOT");
+  const rank = (r) => (r === "SNAPSHOT" ? 0 : r.endsWith("-SNAPSHOT") ? 1 : 2);
+  return [...seen].sort((a, b) => rank(a) - rank(b) || b.localeCompare(a, undefined, { numeric: true }));
+}
+
+// `owci schedule` command line (github.com/aparcar/owci); defaults left out
+export function scheduleCommand({ device, release = "SNAPSHOT", lab = "", tests = "" }) {
+  const quote = (v) => (/^[\w@%+=:,./-]+$/.test(v) ? v : `'${v.replace(/'/g, "'\\''")}'`);
+  const parts = ["owci", "schedule", "--device", quote(device)];
+  if (release && release !== "SNAPSHOT") parts.push("--release", quote(release));
+  if (lab) parts.push("--lab", quote(lab));
+  if (tests) parts.push("--tests", quote(tests));
+  return parts.join(" ");
+}
+
+// --- formatting ----------------------------------------------------------------
+
+// Maestro timestamps are UTC without a zone suffix
+export function parseTime(iso) {
+  return Date.parse(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+}
+
+// "3 hours ago", or for times ahead (timeouts) "in 3 hours"
+export function relativeTime(iso, now = Date.now()) {
+  if (!iso) return "";
+  const s = Math.round((now - parseTime(iso)) / 1000);
+  const abs = Math.abs(s);
+  if (abs < 60) return s < 0 ? "in a minute" : "just now";
+  const units = [["year", 31536000], ["month", 2592000], ["day", 86400], ["hour", 3600], ["minute", 60]];
+  const [unit, secs] = units.find(([, secs]) => abs >= secs);
+  const n = Math.floor(abs / secs);
+  const text = `${n} ${unit}${n === 1 ? "" : "s"}`;
+  return s < 0 ? `in ${text}` : `${text} ago`;
+}
+
+export function duration(ms) {
+  if (ms == null) return "";
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
