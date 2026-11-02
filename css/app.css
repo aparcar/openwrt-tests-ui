@@ -194,6 +194,7 @@ thead th { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em;
 .n-fail { background: var(--fail-bg); border-color: var(--fail); }
 .n-manual { background: var(--surface-2); border-color: var(--muted); }
 .n-infra { background: var(--incomplete-bg); border-color: var(--incomplete); }
+.n-discarded { background: var(--surface-2); border-color: var(--border); }
 
 .empty { text-align: center; padding: 2.5rem 1rem; color: var(--muted); background: var(--surface); border: 1px dashed var(--border); border-radius: var(--radius); }
 .empty h3 { color: var(--text); margin-bottom: 0.25rem; }
@@ -273,15 +274,22 @@ table.queue .mono { white-space: nowrap; }
 
 /* --- labs ------------------------------------------------------------------ */
 
-.lab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
-.lab-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.5rem; }
+.lab-list { display: flex; flex-direction: column; gap: 1.25rem; }
+.lab-card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); display: flex; flex-direction: column; gap: 0.6rem; }
 .lab-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
 .lab-card p { margin: 0; }
-.lab-head { display: flex; align-items: baseline; justify-content: space-between; gap: 0.5rem; }
-.lab-stats { display: flex; flex-wrap: wrap; gap: 0.4rem; }
-.lab-devices { list-style: none; margin: 0; padding: 0; font-size: 0.92rem; }
-.lab-devices li { display: flex; justify-content: space-between; gap: 0.5rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
-.lab-devices .last { font-size: 0.85rem; color: var(--muted); white-space: nowrap; }
+.lab-card h2 { margin: 0; }
+.lab-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem 1rem; flex-wrap: wrap; }
+.lab-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; }
+.table-wrap.flat { box-shadow: none; }
+table.lab-devices { table-layout: fixed; width: 100%; font-size: 0.92rem; }
+table.lab-devices th:nth-child(1) { width: 26%; }
+table.lab-devices th:nth-child(2) { width: 8.5rem; }
+table.lab-devices th:nth-child(3) { width: 10rem; }
+table.lab-devices td:nth-child(3) time, table.lab-devices td:nth-child(5) a { white-space: nowrap; }
+table.lab-devices th:nth-child(5) { width: 9.5rem; }
+table.lab-devices td.note { overflow-wrap: anywhere; font-size: 0.85rem; }
+.health-list { display: flex; flex-direction: column; gap: 0.25rem; }
 .more { font-size: 0.9rem; margin-top: auto; }
 
 /* targets: coverage numbers, then one row per main target */
@@ -337,7 +345,7 @@ table.targets tr.missing > th { box-shadow: inset 3px 0 0 var(--fail); }
 
   /* two facts per row */
   .fact { flex-basis: 40%; }
-  .lab-grid { grid-template-columns: 1fr; }
+  table.lab-devices { table-layout: auto; }
   .segmented { max-width: 100%; overflow-x: auto; }
   .segmented button { white-space: nowrap; }
   .ext { display: none; }

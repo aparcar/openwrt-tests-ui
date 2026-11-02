@@ -25,7 +25,7 @@ export async function runView(root, state, id) {
   const counts = tree.length ? summarize(tree) : run.summary;
 
   // Neighbours in the same lane (same branch, release or snapshot)
-  const lane = history.map(toRun).filter((r) => r.lane === run.lane);
+  const lane = history.map(toRun).filter((r) => r.lane === run.lane && (!r.discarded || r.id === id));
   const at = lane.findIndex((r) => r.id === id);
   const older = at >= 0 ? lane[at + 1] : null;
   const newer = at > 0 ? lane[at - 1] : null;
@@ -42,6 +42,11 @@ export async function runView(root, state, id) {
           run.isRelease ? "Release" : "Snapshot", " of ", h("strong", {}, run.branch),
           ow.target ? [" · ", h("span", { class: "mono" }, `${ow.target}/${ow.profile || ""}`)] : null)),
       h("div", { class: "head-status" }, statusBadge(st), counts ? countsBar(counts) : null)),
+    run.discarded ? h("div", { class: "notice n-discarded", role: "status" },
+      h("strong", {}, "Discarded"), run.discarded.reason ? [": ", run.discarded.reason] : null,
+      h("span", { class: "muted" }, ` (by ${run.discarded.by || "someone"}`,
+        run.discarded.at ? [", ", timeAgo(run.discarded.at)] : null,
+        "; not shown in the overview, device and lab pages)")) : null,
     isOfficial(run, state.config.official) ? null : h("div", { class: "notice n-manual" },
       h("strong", {}, `Manual run by ${run.owner || "someone"}`),
       run.trigger.title ? [": ", run.trigger.title] : null,

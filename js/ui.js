@@ -36,6 +36,16 @@ export function statusBadge(st, { compact = false, extra = null } = {}) {
     extra);
 }
 
+// A device's health in a lab (model.toHealth): its result, or offline
+export function healthBadge(report, { compact = false } = {}) {
+  if (report.offline) {
+    return h("span", { class: "badge s-none", title: "Offline: no report recently" },
+      h("span", { class: "badge-icon", "aria-hidden": "true" }, "–"),
+      compact ? h("span", { class: "sr-only" }, "Offline") : h("span", {}, "Offline"));
+  }
+  return statusBadge(report.result, { compact });
+}
+
 export function timeAgo(iso) {
   if (!iso) return h("span", { class: "muted" }, "—");
   const exact = /[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`;

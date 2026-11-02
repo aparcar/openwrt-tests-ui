@@ -1,17 +1,22 @@
-// One device: what it is, which labs ran it, and its run history per build
-// lane (branch × release/snapshot), newest first. All from its jobs.
+// One device: what it is, which labs have it and its health there (their
+// health reports), and its run history per build lane (branch ×
+// release/snapshot), newest first.
 
 import { jobsForPlatform } from "../api.js";
-import { compareLanes, duration, groupByLane, inventory, labOf, laneLabel, releasesOf, status, toRun } from "../model.js";
-import { countsBar, emptyState, h, link, manualBadge, mount, statusBadge, timeAgo, stackTable } from "../ui.js";
+import { health } from "../inventory.js";
+import { compareLanes, duration, groupByLane, healthOfPlatform, inventory, labOf, laneLabel, releasesOf, status, toRun } from "../model.js";
+import { countsBar, emptyState, h, healthBadge, link, manualBadge, mount, statusBadge, timeAgo, stackTable } from "../ui.js";
+import { healthNote } from "./labs.js";
 import { scheduleBox } from "./schedule.js";
 
 export async function deviceView(root, state, platform) {
   mount(root, h("p", { class: "muted" }, "Loading runs…"));
-  const runs = (await jobsForPlatform(platform, 100)).map(toRun);
+  const [jobs, labHealth] = await Promise.all([jobsForPlatform(platform, 100), health()]);
+  const runs = jobs.map(toRun).filter((r) => !r.discarded);
   const inv = inventory(runs, {}, state.config.pool ? [state.config.pool] : []);
   const device = inv.devices.get(platform) || { name: platform, features: [] };
-  const labs = [...(device.labs || [])].sort();
+  const reports = healthOfPlatform(labHealth, platform);
+  const labs = [...new Set([...(device.labs || []), ...reports.map((r) => r.lab)])].sort();
   const listHost = h("div");
 
   mount(root,
@@ -27,6 +32,11 @@ export async function deviceView(root, state, platform) {
         h("span", { class: "fact-value" }, labs.length
           ? labs.map((lab) => h("a", { class: "chip", href: link(["labs"], { lab }) }, lab))
           : h("span", { class: "muted" }, "none"))),
+      reports.length ? h("div", { class: "fact" }, h("span", { class: "fact-label" }, "Health"),
+        h("span", { class: "fact-value health-list" }, reports.map((r) => h("span", {},
+          healthBadge(r), " ",
+          h("a", { href: link(["labs"], { lab: r.lab }) }, r.lab), " ", timeAgo(r.created),
+          r.offline || r.result !== "pass" ? h("span", { class: "sub" }, healthNote(r)) : null)))) : null,
       device.features?.length ? h("div", { class: "fact" }, h("span", { class: "fact-label" }, "Features"),
         h("span", { class: "fact-value" }, device.features.map((f) => h("span", { class: "chip plain" }, f)))) : null),
     scheduleBox({ title: "Schedule a run", device: platform, releases: releasesOf(runs), labs }),

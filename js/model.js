@@ -22,6 +22,9 @@ export function toRun(job) {
     // who created the run (Maestro sets it), and why: title/url (owci)
     owner: job.owner || null,
     trigger: data.misc?.trigger || {},
+    // `owci discard`: { reason, by, at }, e.g. a hardware fault; hidden
+    // everywhere but its own page
+    discarded: data.misc?.discarded || null,
     // set when a lab claimed the job from the shared pool (see inventory)
     pool: data.misc?.pool || data.pool || null,
     // the scheduler copies the device's name and features from its target
@@ -314,6 +317,72 @@ export function labStats(runs) {
   }
   const finished = counts.pass + counts.fail + counts.incomplete + counts.skip;
   return { counts, last, finished, infraRate: finished ? counts.incomplete / finished : 0 };
+}
+
+// --- device health: the labs' healthcheck nodes --------------------------------
+
+// Each lab's labgrid-agent reports every device it has as a healthcheck job
+// node (no parent) after each health check, on changes and every 12 h
+// (deploy/DATA.md): result pass (check passed), fail (failed, or the device
+// is in maintenance) or skip (no check possible), why in data.error_msg.
+// They are the list of devices per lab. Reports older than this mean the lab
+// lost the device (or is down); the scheduler stops scheduling it too.
+export const HEALTH_MAX_AGE_H = 48;
+
+export function toHealth(node) {
+  const data = node.data || {};
+  return {
+    id: node.id,
+    lab: data.runtime,
+    owner: node.owner || null,
+    platform: data.platform,
+    place: data.device || null,
+    result: node.result || "skip",
+    reason: data.error_msg || "",
+    // only when a check ran: golden image release, firmware, test counts
+    check: data.misc?.healthcheck || null,
+    created: node.created,
+    log: node.artifacts?.test_log || null,
+  };
+}
+
+// Healthcheck nodes -> lab -> platform -> the newest report, plus `offline`
+// (no report for HEALTH_MAX_AGE_H) and `schedulable` (pass or skip, not
+// offline: what the scheduler runs jobs on). Only reports a lab made about
+// itself count: Maestro sets the owner, a lab's API user is named after the
+// lab, so nobody can report devices for another lab.
+export function deviceHealth(nodes, now = Date.now()) {
+  const labs = new Map();
+  for (const report of nodes.map(toHealth)) {
+    if (!report.lab || !report.platform || report.owner !== report.lab) continue;
+    if (!labs.has(report.lab)) labs.set(report.lab, new Map());
+    const devices = labs.get(report.lab);
+    const prev = devices.get(report.platform);
+    if (!prev || parseTime(report.created) > parseTime(prev.created)) devices.set(report.platform, report);
+  }
+  for (const devices of labs.values()) {
+    for (const report of devices.values()) {
+      report.offline = now - parseTime(report.created) > HEALTH_MAX_AGE_H * 3600_000;
+      report.schedulable = !report.offline && report.result !== "fail";
+    }
+  }
+  return labs;
+}
+
+// The useful line of a report's reason: pytest's summary or exit message
+// without its !!!!/==== framing and exception name
+export function healthReason(reason) {
+  const lines = (reason || "").split("\n")
+    .map((l) => l.replace(/^[\s!=]+|[\s!=]+$/g, "").replace(/^_pytest\.outcomes\.Exit:\s*/, ""))
+    .filter(Boolean);
+  const line = lines.pop() || "";
+  return line.length > 160 ? `…${line.slice(-160)}` : line;
+}
+
+// The health of one device in every lab that has it, unavailable first
+export function healthOfPlatform(labs, platform) {
+  return [...labs.values()].map((devices) => devices.get(platform)).filter(Boolean)
+    .sort((a, b) => a.schedulable - b.schedulable || a.lab.localeCompare(b.lab));
 }
 
 // --- target coverage -------------------------------------------------------------

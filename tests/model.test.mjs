@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  compareLanes, duration, groupByLane, inventory, isOfficial, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
+  compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
   status, summarize, targetCoverage, testTree, toRun, worstStatus,
 } from "../js/model.js";
 
@@ -22,6 +22,12 @@ const job = (over = {}) => ({
     kernel_revision: { branch: "openwrt-25.12", describe: "v25.12.5", commit: "f0a60eee", commit_tags: ["v25.12.5"] },
     ...(over.data || {}),
   },
+});
+
+test("toRun keeps the discard mark", () => {
+  assert.equal(toRun(job()).discarded, null);
+  const mark = { reason: "broken PSU", by: "paul", at: "2026-11-01T10:00:00+00:00" };
+  assert.deepEqual(toRun(job({ data: { misc: { discarded: mark } } })).discarded, mark);
 });
 
 test("toRun maps job nodes", () => {
@@ -254,4 +260,60 @@ test("targetCoverage groups devices by main target", () => {
   assert.deepEqual(cov.unknown.map((d) => d.platform), ["old"]);
   assert.deepEqual([...cov.coveredArches].sort(), ["mips_24kc", "x86_64"]);
   assert.deepEqual(cov.summary, { targets: 4, covered: 3, subtargets: 5, coveredSubtargets: 3, arches: 3, coveredArches: 2 });
+});
+
+// --- device health ---------------------------------------------------------------
+
+const report = (over = {}) => ({
+  id: over.id || "h1",
+  kind: "job",
+  name: "healthcheck",
+  owner: "lab-a",
+  state: "done",
+  result: "pass",
+  created: "2026-11-02T08:00:00.000",
+  ...over,
+  data: { platform: "openwrt_one", runtime: "lab-a", device: "labgrid-a-one", ...(over.data || {}) },
+});
+const NOW = Date.parse("2026-11-02T12:00:00Z");
+
+test("deviceHealth keeps the newest report per lab and device", () => {
+  const labs = deviceHealth([
+    report({ id: "old", created: "2026-11-01T08:00:00.000", result: "fail", data: { error_msg: "no shell" } }),
+    report({ id: "new" }),
+    report({ id: "b", owner: "lab-b", result: "fail", data: { runtime: "lab-b", error_msg: "maintenance: new_psu" } }),
+  ], NOW);
+  const one = labs.get("lab-a").get("openwrt_one");
+  assert.equal(one.id, "new");
+  assert.equal(one.schedulable, true);
+  const b = labs.get("lab-b").get("openwrt_one");
+  assert.equal(b.reason, "maintenance: new_psu");
+  assert.equal(b.schedulable, false);
+  // unavailable first
+  assert.deepEqual(healthOfPlatform(labs, "openwrt_one").map((r) => r.lab), ["lab-b", "lab-a"]);
+});
+
+test("deviceHealth ignores reports a lab made for another lab", () => {
+  const labs = deviceHealth([report({ owner: "paul" })], NOW);
+  assert.equal(labs.size, 0);
+});
+
+test("deviceHealth: old reports are offline, skipped checks are schedulable", () => {
+  const labs = deviceHealth([
+    report({ created: "2026-10-30T08:00:00.000" }),
+    report({ id: "q", result: "skip", data: { platform: "qemu_x86-64", error_msg: "no health check" } }),
+  ], NOW);
+  const one = labs.get("lab-a").get("openwrt_one");
+  assert.equal(one.offline, true);
+  assert.equal(one.schedulable, false);
+  assert.equal(labs.get("lab-a").get("qemu_x86-64").schedulable, true);
+});
+
+test("healthReason drops pytest's framing", () => {
+  assert.equal(healthReason("x\n!!!!!!!!!! _pytest.outcomes.Exit: Failed to transition to state shell !!!!!!!!!!\n"),
+    "Failed to transition to state shell");
+  assert.equal(healthReason("============== 1 passed, 2 warnings, 1 error in 159.48s (0:02:39) =============="),
+    "1 passed, 2 warnings, 1 error in 159.48s (0:02:39)");
+  assert.equal(healthReason("maintenance: USB power issues"), "maintenance: USB power issues");
+  assert.equal(healthReason(""), "");
 });

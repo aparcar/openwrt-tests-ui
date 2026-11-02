@@ -20,18 +20,24 @@ export async function loadConfig() {
   return { config, labsInfo: labs.labs || {} };
 }
 
-// All jobs of the last recent_days (default 14) in one request: the device
-// matrix, the labs and the device list are built from them
-export async function recentJobs() {
-  const days = cfg.recent_days || 14;
-  // whole days keep the URL (and so the 30 s cache) stable
-  const since = new Date(Date.now() - days * 86400_000).toISOString().slice(0, 10);
-  return maestro("/nodes/fast", { kind: "job", created__gt: since });
-}
+// Test runs are job nodes named openwrt-tests; the labs' healthcheck job
+// nodes (device health, see healthReports) are not runs
+const RUN = { kind: "job", name: "openwrt-tests" };
 
-// Every unfinished job, however old: the queue (claimed ones keep state
+// whole days keep the URL (and so the 30 s cache) stable
+const since = () => new Date(Date.now() - (cfg.recent_days || 14) * 86400_000).toISOString().slice(0, 10);
+
+// All runs of the last recent_days (default 14) in one request: the device
+// matrix, the labs and the device list are built from them
+export const recentJobs = () => maestro("/nodes/fast", { ...RUN, created__gt: since() });
+
+// Every unfinished run, however old: the queue (claimed ones keep state
 // "available" and get data.job_id)
-export const unfinishedJobs = () => maestro("/nodes/fast", { kind: "job", state__ne: "done" });
+export const unfinishedJobs = () => maestro("/nodes/fast", { ...RUN, state__ne: "done" });
+
+// The labs' health reports of the last recent_days (model.deviceHealth): which
+// devices each lab has and their health
+export const healthReports = () => maestro("/nodes/fast", { kind: "job", name: "healthcheck", created__gt: since() });
 
 async function getJSON(url, cached = true) {
   const hit = cached && cache.get(url);
@@ -65,8 +71,8 @@ export async function count(params) {
   return (await nodes({ ...params, limit: 1 })).total || 0;
 }
 
-export const jobsForPlatform = (platform, n) => latestNodes({ kind: "job", "data.platform": platform }, n);
-export const jobsForLab = (lab, n) => latestNodes({ kind: "job", "data.runtime": lab }, n);
+export const jobsForPlatform = (platform, n) => latestNodes({ ...RUN, "data.platform": platform }, n);
+export const jobsForLab = (lab, n) => latestNodes({ ...RUN, "data.runtime": lab }, n);
 export const children = async (id) => (await nodes({ parent: id, limit: 500 })).items;
 
 // Module nodes, then their tests (two levels below the job)
@@ -82,7 +88,7 @@ export const buildOfJob = (job) => (job.parent ? node(job.parent) : Promise.reso
 
 // Earlier runs of the same device and build lane, for "previous run" links
 export const jobsForPlatformBranch = (platform, branch, n) =>
-  latestNodes({ kind: "job", "data.platform": platform, "data.kernel_revision.branch": branch }, n);
+  latestNodes({ ...RUN, "data.platform": platform, "data.kernel_revision.branch": branch }, n);
 
 // The agent creates a sibling "boot" test under the build node
 export async function bootOfJob(job) {
