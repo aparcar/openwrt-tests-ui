@@ -1,13 +1,13 @@
 // Entry point: load config and static data once, then render the view for
 // the current hash route (#/, #/device/<platform>, #/run/<job id>[/file/<artifact>],
-// #/queue, #/manual, #/labs, #/targets, #/about).
+// #/queue, #/manual, #/labs, #/health/<node id>[/<artifact>], #/targets, #/about).
 
 import { loadConfig } from "./api.js";
 import { errorBox, mount, route } from "./ui.js";
 import { aboutView } from "./views/about.js";
 import { deviceView } from "./views/device.js";
 import { devicesView } from "./views/devices.js";
-import { labsView } from "./views/labs.js";
+import { healthLogView, labsView } from "./views/labs.js";
 import { manualView } from "./views/manual.js";
 import { queueView } from "./views/queue.js";
 import { fileView, runView } from "./views/run.js";
@@ -27,6 +27,7 @@ const routes = {
   queue: { nav: "queue", view: queueView },
   manual: { nav: "manual", view: manualView },
   labs: { nav: "labs", view: labsView },
+  health: { nav: "labs", view: (root, s, [id, key]) => healthLogView(root, s, id, key) },
   targets: { nav: "targets", view: targetsView },
   about: { nav: "about", view: aboutView },
 };

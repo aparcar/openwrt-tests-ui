@@ -184,7 +184,10 @@ function testItem(t, selected) {
       t.errorMsg ? h("span", { class: `test-error${t.result === "skip" ? "" : " t-fail"}`, title: t.errorMsg },
         t.errorMsg.split("\n")[0]) : null,
       h("span", { class: "grow" }),
+      t.properties.length ? h("span", { class: "chip plain", title: "Values the test recorded" },
+        `${t.properties.length} value${t.properties.length === 1 ? "" : "s"}`) : null,
       h("span", { class: "muted" }, t.durationMs != null ? duration(t.durationMs) : "")));
+  if (t.properties.length) item.append(propertiesTable(t.properties));
   item.append(logHost);
   item.addEventListener("toggle", async () => {
     // the address bar links to the open test
@@ -208,6 +211,13 @@ function testItem(t, selected) {
     requestAnimationFrame(() => item.scrollIntoView({ block: "start" }));
   }
   return h("li", {}, item);
+}
+
+// What a test recorded (record_property), shown above its log
+function propertiesTable(properties) {
+  return h("table", { class: "test-properties" },
+    h("tbody", {}, properties.map(([name, value]) =>
+      h("tr", {}, h("th", { scope: "row", class: "mono" }, name), h("td", { class: "mono" }, value)))));
 }
 
 // full: the log is the whole page (no height limit)

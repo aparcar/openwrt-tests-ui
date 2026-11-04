@@ -4,10 +4,11 @@
 // come from the health reports and the jobs; data/labs.json (optional) adds
 // details.
 
-import { proxiedArtifact } from "../api.js";
+import { fetchText, node } from "../api.js";
 import { health, recent } from "../inventory.js";
-import { HEALTH_MAX_AGE_H, healthReason, labOf, labStats, status } from "../model.js";
+import { HEALTH_MAX_AGE_H, healthReason, labOf, labStats, status, toHealth } from "../model.js";
 import { emptyState, h, healthBadge, link, mount, route, stackTable, statusBadge, timeAgo } from "../ui.js";
+import { logView } from "./run.js";
 
 export async function labsView(root, state) {
   const selected = route().query.get("lab");
@@ -92,5 +93,44 @@ const deviceName = (inv, platform) => inv.devices.get(platform)?.name || platfor
 export function healthNote(report) {
   const reason = report.offline ? `no report for ${HEALTH_MAX_AGE_H} h` : healthReason(report.reason);
   return [reason ? h("span", { class: report.offline || report.result === "fail" ? "t-fail" : "muted" }, reason) : null,
-    report.log ? [reason ? " · " : null, h("a", { href: proxiedArtifact(report.log) }, "log")] : null];
+    report.log ? [reason ? " · " : null, h("a", { href: link(["health", report.id]) }, "log")] : null];
+}
+
+// A health check's files, shown in the page (#/health/<node id>[/<key>]):
+// storage sends everything as a download
+const HEALTH_FILES = { test_log: "Console log", pytest_log: "pytest output", junit: "JUnit XML" };
+
+export async function healthLogView(root, state, id, key = "test_log") {
+  mount(root, h("p", { class: "muted" }, "Loading log…"));
+  const job = await node(id);
+  const report = toHealth(job);
+  const artifacts = job.artifacts || {};
+  const label = HEALTH_FILES[key] || key;
+  const url = artifacts[key];
+  // without a console log the agent sends pytest's output as test_log
+  const others = Object.keys(HEALTH_FILES)
+    .filter((k) => k !== key && artifacts[k] && artifacts[k] !== url)
+    .map((k) => h("a", { class: "file", href: link(["health", id, k]) }, HEALTH_FILES[k]));
+  const head = [
+    h("nav", { class: "crumbs", "aria-label": "Breadcrumb" },
+      h("a", { href: link(["labs"]) }, "Labs"), " / ",
+      h("a", { href: link(["labs"], { lab: report.lab }) }, report.lab), " / ",
+      h("a", { href: link(["device", report.platform]) }, report.platform), " / ",
+      h("span", {}, "Health check")),
+  ];
+  if (!url) {
+    mount(root, ...head, emptyState(`No ${label.toLowerCase()}`, "This health check has no such file."));
+    return;
+  }
+  const text = await fetchText(url);
+  mount(root, ...head,
+    h("header", { class: "page-head" }, h("div", {},
+      h("h1", {}, `Health check: ${label}`),
+      h("p", { class: "lede" }, statusBadge(report.result), " ",
+        `${report.platform} · ${report.lab}${report.place ? ` (${report.place})` : ""} · `,
+        timeAgo(report.created),
+        report.check?.release ? ` · ${report.check.release}` : "",
+        ` · ${text.split("\n").length} lines`),
+      others.length ? h("p", { class: "file-links" }, others) : null)),
+    logView(text, url, { full: true }));
 }

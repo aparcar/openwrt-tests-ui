@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import {
   compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
-  status, summarize, targetCoverage, testTree, toRun, worstStatus,
+  status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
 } from "../js/model.js";
 
 const job = (over = {}) => ({
@@ -88,6 +88,15 @@ test("testTree and summarize", () => {
   assert.deepEqual(tree[0].tests.map((t) => t.name), ["test_backup", "test_shell", "test_ssh"]);
   assert.equal(tree[0].tests[2].errorMsg, "timeout");
   assert.deepEqual(summarize(tree), { total: 3, passed: 1, failed: 1, skipped: 1, errors: 0 });
+});
+
+test("test properties: sorted, JSON lists joined, other values as they are", () => {
+  assert.deepEqual(testProperties({ used_memory: "38", probe_lan_ipv6: '["fd00::2/64", "fd00::3/64"]', board: "[x" }),
+    [["board", "[x"], ["probe_lan_ipv6", "fd00::2/64, fd00::3/64"], ["used_memory", "38"]]);
+  assert.deepEqual(testProperties(undefined), []);
+  const [m] = testTree([{ id: "m", name: "base" }],
+    { m: [{ id: "t", name: "test_free_memory", data: { misc: { properties: { used_memory: "38" } } } }] });
+  assert.deepEqual(m.tests[0].properties, [["used_memory", "38"]]);
 });
 
 test("formatting", () => {

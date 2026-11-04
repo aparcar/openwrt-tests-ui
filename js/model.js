@@ -263,10 +263,29 @@ export function testTree(modules, testsByModule) {
           errorMsg: t.data?.error_msg || null,
           // its own log (agent: one log per test); older runs have none
           logUrl: t.artifacts?.test_log || null,
+          // what the test measured (record_property), name -> value
+          properties: testProperties(t.data?.misc?.properties),
         }))
         .sort((a, b) => a.name.localeCompare(b.name)),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// record_property values come as strings, lists as JSON: [[name, text]]
+// sorted by name, lists joined with ", "
+export function testProperties(properties) {
+  return Object.entries(properties || {})
+    .map(([name, value]) => {
+      let text = String(value);
+      if (text.startsWith("[")) {
+        try {
+          const list = JSON.parse(text);
+          if (Array.isArray(list)) text = list.join(", ");
+        } catch { /* show as is */ }
+      }
+      return [name, text];
+    })
+    .sort(([a], [b]) => a.localeCompare(b));
 }
 
 export function summarize(tree) {
