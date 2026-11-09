@@ -4,7 +4,7 @@
 
 import { jobsForPlatform } from "../api.js";
 import { health } from "../inventory.js";
-import { compareLanes, duration, groupByLane, healthOfPlatform, inventory, labOf, laneLabel, releasesOf, status, toRun } from "../model.js";
+import { compareLanes, duration, groupByLane, healthOfPlatform, inventory, labOf, laneLabel, placeLabel, releasesOf, status, toRun } from "../model.js";
 import { countsBar, emptyState, h, healthBadge, link, manualBadge, mount, statusBadge, timeAgo, stackTable } from "../ui.js";
 import { healthNote } from "./labs.js";
 import { scheduleBox } from "./schedule.js";
@@ -17,6 +17,8 @@ export async function deviceView(root, state, platform) {
   const device = inv.devices.get(platform) || { name: platform, features: [] };
   const reports = healthOfPlatform(labHealth, platform);
   const labs = [...new Set([...(device.labs || []), ...reports.map((r) => r.lab)])].sort();
+  // a lab with several copies of the board reports each place
+  const copies = (lab) => reports.filter((r) => r.lab === lab).length;
   const listHost = h("div");
 
   mount(root,
@@ -35,7 +37,9 @@ export async function deviceView(root, state, platform) {
       reports.length ? h("div", { class: "fact" }, h("span", { class: "fact-label" }, "Health"),
         h("span", { class: "fact-value health-list" }, reports.map((r) => h("span", {},
           healthBadge(r), " ",
-          h("a", { href: link(["labs"], { lab: r.lab }) }, r.lab), " ", timeAgo(r.created),
+          h("a", { href: link(["labs"], { lab: r.lab }) }, r.lab),
+          copies(r.lab) > 1 ? [" ", h("span", { class: "mono" }, placeLabel(r.place, r.lab))] : null,
+          " ", timeAgo(r.created),
           r.offline || r.result !== "pass" ? h("span", { class: "sub" }, healthNote(r)) : null)))) : null,
       device.features?.length ? h("div", { class: "fact" }, h("span", { class: "fact-label" }, "Features"),
         h("span", { class: "fact-value" }, device.features.map((f) => h("span", { class: "chip plain" }, f)))) : null),

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
+  compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, placeLabel, platformAvailable, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
   status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
 } from "../js/model.js";
 
@@ -299,14 +299,44 @@ test("deviceHealth keeps the newest report per lab and device", () => {
     report({ id: "new" }),
     report({ id: "b", owner: "lab-b", result: "fail", data: { runtime: "lab-b", error_msg: "maintenance: new_psu" } }),
   ], NOW);
-  const one = labs.get("lab-a").get("openwrt_one");
+  const [one] = labs.get("lab-a").get("openwrt_one");
   assert.equal(one.id, "new");
   assert.equal(one.schedulable, true);
-  const b = labs.get("lab-b").get("openwrt_one");
+  const [b] = labs.get("lab-b").get("openwrt_one");
   assert.equal(b.reason, "maintenance: new_psu");
   assert.equal(b.schedulable, false);
   // unavailable first
   assert.deepEqual(healthOfPlatform(labs, "openwrt_one").map((r) => r.lab), ["lab-b", "lab-a"]);
+});
+
+test("deviceHealth keeps each place of a platform apart", () => {
+  const place = (n, over = {}) => report({ id: `p${n}`, ...over, data: { device: `labgrid-a-one_${n}`, ...(over.data || {}) } });
+  const labs = deviceHealth([
+    place(1),
+    place(2, { result: "fail", data: { error_msg: "no shell" } }),
+    place(2, { id: "p2-old", created: "2026-11-02T07:00:00.000" }),
+    place(3, { result: "skip" }),
+    // an older agent's single report for all places, now offline
+    report({ id: "all", created: "2026-10-30T08:00:00.000", data: { device: "labgrid-a-one_1, labgrid-a-one_2" } }),
+  ], NOW);
+  const reports = labs.get("lab-a").get("openwrt_one");
+  assert.deepEqual(reports.map((r) => r.id), ["p2", "p1", "p3"]); // unavailable first
+  assert.equal(platformAvailable(reports), true);
+  assert.equal(platformAvailable(reports.slice(0, 1)), false);
+  assert.deepEqual(healthOfPlatform(labs, "openwrt_one").map((r) => r.id), ["p2", "p1", "p3"]);
+});
+
+test("deviceHealth keeps an offline place while no other place reports", () => {
+  const labs = deviceHealth([report({ created: "2026-10-30T08:00:00.000" })], NOW);
+  const [one] = labs.get("lab-a").get("openwrt_one");
+  assert.equal(one.offline, true);
+});
+
+test("placeLabel drops the lab prefix", () => {
+  assert.equal(placeLabel("labgrid-fcefyn-belkin_rt3200_1", "fcefyn"), "belkin_rt3200_1");
+  assert.equal(placeLabel("aparcar-qemu_x86-64", "aparcar"), "qemu_x86-64");
+  assert.equal(placeLabel("other-place", "fcefyn"), "other-place");
+  assert.equal(placeLabel(null, "fcefyn"), "");
 });
 
 test("deviceHealth ignores reports a lab made for another lab", () => {
@@ -319,10 +349,10 @@ test("deviceHealth: old reports are offline, skipped checks are schedulable", ()
     report({ created: "2026-10-30T08:00:00.000" }),
     report({ id: "q", result: "skip", data: { platform: "qemu_x86-64", error_msg: "no health check" } }),
   ], NOW);
-  const one = labs.get("lab-a").get("openwrt_one");
+  const [one] = labs.get("lab-a").get("openwrt_one");
   assert.equal(one.offline, true);
   assert.equal(one.schedulable, false);
-  assert.equal(labs.get("lab-a").get("qemu_x86-64").schedulable, true);
+  assert.equal(labs.get("lab-a").get("qemu_x86-64")[0].schedulable, true);
 });
 
 test("healthReason drops pytest's framing", () => {

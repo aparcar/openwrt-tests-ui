@@ -366,27 +366,56 @@ export function toHealth(node) {
   };
 }
 
-// Healthcheck nodes -> lab -> platform -> the newest report, plus `offline`
-// (no report for HEALTH_MAX_AGE_H) and `schedulable` (pass or skip, not
-// offline: what the scheduler runs jobs on). Only reports a lab made about
-// itself count: Maestro sets the owner, a lab's API user is named after the
-// lab, so nobody can report devices for another lab.
+// Healthcheck nodes -> lab -> platform -> the newest report of each of its
+// places (data.device: a lab can have several copies of a board, each its own
+// labgrid place), unavailable first, plus `offline` (no report for
+// HEALTH_MAX_AGE_H) and `schedulable` (pass or skip, not offline: the lab
+// runs jobs on it). A lab offers the platform while one place is schedulable
+// (platformAvailable). Places that went offline while another place of the
+// platform still reports are left out (removed places, and the single
+// all-places report of agents from before per-place health). Only reports a
+// lab made about itself count: Maestro sets the owner, a lab's API user is
+// named after the lab, so nobody can report devices for another lab.
 export function deviceHealth(nodes, now = Date.now()) {
-  const labs = new Map();
+  const newest = new Map(); // lab -> platform -> place -> report
   for (const report of nodes.map(toHealth)) {
     if (!report.lab || !report.platform || report.owner !== report.lab) continue;
-    if (!labs.has(report.lab)) labs.set(report.lab, new Map());
-    const devices = labs.get(report.lab);
-    const prev = devices.get(report.platform);
-    if (!prev || parseTime(report.created) > parseTime(prev.created)) devices.set(report.platform, report);
+    if (!newest.has(report.lab)) newest.set(report.lab, new Map());
+    const platforms = newest.get(report.lab);
+    if (!platforms.has(report.platform)) platforms.set(report.platform, new Map());
+    const places = platforms.get(report.platform);
+    const prev = places.get(report.place);
+    if (!prev || parseTime(report.created) > parseTime(prev.created)) places.set(report.place, report);
   }
-  for (const devices of labs.values()) {
-    for (const report of devices.values()) {
-      report.offline = now - parseTime(report.created) > HEALTH_MAX_AGE_H * 3600_000;
-      report.schedulable = !report.offline && report.result !== "fail";
+  const labs = new Map();
+  for (const [lab, platforms] of newest) {
+    const devices = new Map();
+    for (const [platform, places] of platforms) {
+      let reports = [...places.values()];
+      for (const report of reports) {
+        report.offline = now - parseTime(report.created) > HEALTH_MAX_AGE_H * 3600_000;
+        report.schedulable = !report.offline && report.result !== "fail";
+      }
+      if (reports.some((r) => !r.offline)) reports = reports.filter((r) => !r.offline);
+      reports.sort((a, b) => a.schedulable - b.schedulable || (a.place || "").localeCompare(b.place || ""));
+      devices.set(platform, reports);
     }
+    labs.set(lab, devices);
   }
   return labs;
+}
+
+// Does the lab offer the platform: one of its places' reports is schedulable
+export const platformAvailable = (reports) => reports.some((r) => r.schedulable);
+
+// A place's short name in its lab: "labgrid-fcefyn-belkin_rt3200_1" in lab
+// fcefyn -> "belkin_rt3200_1"
+export function placeLabel(place, lab) {
+  if (!place) return "";
+  for (const prefix of [`labgrid-${lab}-`, `${lab}-`]) {
+    if (place.startsWith(prefix) && place.length > prefix.length) return place.slice(prefix.length);
+  }
+  return place;
 }
 
 // The useful line of a report's reason: pytest's summary or exit message
@@ -399,10 +428,12 @@ export function healthReason(reason) {
   return line.length > 160 ? `…${line.slice(-160)}` : line;
 }
 
-// The health of one device in every lab that has it, unavailable first
+// The health of one device in every lab that has it, one report per place,
+// unavailable first
 export function healthOfPlatform(labs, platform) {
-  return [...labs.values()].map((devices) => devices.get(platform)).filter(Boolean)
-    .sort((a, b) => a.schedulable - b.schedulable || a.lab.localeCompare(b.lab));
+  return [...labs.values()].flatMap((devices) => devices.get(platform) || [])
+    .sort((a, b) => a.schedulable - b.schedulable || a.lab.localeCompare(b.lab)
+      || (a.place || "").localeCompare(b.place || ""));
 }
 
 // --- target coverage -------------------------------------------------------------

@@ -6,7 +6,7 @@
 
 import { fetchText, node } from "../api.js";
 import { health, recent } from "../inventory.js";
-import { HEALTH_MAX_AGE_H, healthReason, labOf, labStats, status, toHealth } from "../model.js";
+import { HEALTH_MAX_AGE_H, healthReason, labOf, labStats, placeLabel, platformAvailable, status, toHealth } from "../model.js";
 import { emptyState, h, healthBadge, link, mount, route, stackTable, statusBadge, timeAgo } from "../ui.js";
 import { logView } from "./run.js";
 
@@ -42,13 +42,22 @@ function labCard(lab, inv, devices, selected) {
   const manual = inv.runs.filter((r) => labOf(r, inv.pools) === lab.name).length - runs.length;
   const stats = labStats(runs);
   // devices: the lab's health reports, plus devices it ran without reporting
-  // them (agents from before the reports); unavailable ones first
-  const available = (p) => devices.get(p)?.schedulable ?? true;
+  // them (agents from before the reports); unavailable ones first. One row
+  // per place: a lab can have several copies of a board
+  const available = (p) => (devices.has(p) ? platformAvailable(devices.get(p)) : true);
   const platforms = [...new Set([...devices.keys(), ...runs.map((r) => r.platform)])]
     .sort((a, b) => available(a) - available(b) || deviceName(inv, a).localeCompare(deviceName(inv, b)));
-  const lastReport = [...devices.values()].map((d) => d.created).sort().pop();
+  const rows = platforms.flatMap((p) => {
+    const reports = devices.get(p) || [];
+    if (reports.length < 2) return [{ platform: p, report: reports[0], last: runs.find((r) => r.platform === p) }];
+    return reports.map((report) => ({
+      platform: p, report, place: placeLabel(report.place, lab.name),
+      last: runs.find((r) => r.platform === p && r.device === report.place),
+    }));
+  });
+  const lastReport = [...devices.values()].flat().map((d) => d.created).sort().pop();
   const last = [stats.last, lastReport].filter(Boolean).sort().pop();
-  const problems = platforms.filter((p) => !available(p)).length;
+  const problems = rows.filter((row) => row.report && !row.report.schedulable).length;
   return h("section", { class: `lab-card${selected ? " selected" : ""}`, id: `lab-${lab.name}` },
     h("header", { class: "lab-head" },
       h("div", {},
@@ -65,19 +74,21 @@ function labCard(lab, inv, devices, selected) {
         manual ? h("a", { class: "muted", href: link(["manual"], { lab: lab.name }) },
           `${manual} manual run${manual === 1 ? "" : "s"}`) : null)),
     h("p", { class: "lab-summary" },
-      h("strong", {}, `${platforms.length} device${platforms.length === 1 ? "" : "s"}`),
+      h("strong", {}, `${rows.length} device${rows.length === 1 ? "" : "s"}`),
       problems ? [" · ", h("span", { class: "t-fail" }, `${problems} not available`)] : null,
       platforms.length ? [" · ", h("a", { href: link([], { lab: lab.name }) }, "device matrix →")] : null),
-    platforms.length ? h("div", { class: "table-wrap flat" }, stackTable(h("table", { class: "lab-devices" },
+    rows.length ? h("div", { class: "table-wrap flat" }, stackTable(h("table", { class: "lab-devices" },
       h("thead", {}, h("tr", {}, ["Device", "Health", "Checked", "Note", "Last run"].map((c) => h("th", { scope: "col" }, c)))),
-      h("tbody", {}, platforms.map((p) => deviceRow(inv, p, devices.get(p), runs.find((r) => r.platform === p))))))) : null);
+      h("tbody", {}, rows.map((row) => deviceRow(inv, row)))))) : null);
 }
 
-// One device of a lab: its health report (if any) and its latest official
-// run (runs are newest first)
-function deviceRow(inv, platform, report, last) {
+// One device of a lab (one place, if the lab has several copies of the
+// board): its health report (if any) and its latest official run (runs are
+// newest first)
+function deviceRow(inv, { platform, report, place, last }) {
   return h("tr", {},
-    h("td", {}, h("a", { href: link(["device", platform]) }, deviceName(inv, platform))),
+    h("td", {}, h("a", { href: link(["device", platform]) }, deviceName(inv, platform)),
+      place ? h("span", { class: "sub mono" }, place) : null),
     h("td", {}, report ? healthBadge(report) : h("span", { class: "muted" }, "—")),
     h("td", {}, report ? [timeAgo(report.created), report.check?.release
       ? h("span", { class: "sub" }, report.check.release) : null] : h("span", { class: "muted" }, "—")),
