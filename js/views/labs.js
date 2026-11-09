@@ -2,7 +2,8 @@
 // reports, like LAVA's device list), the latest official run per device, and
 // how many runs ended in lab problems (incomplete) rather than results. Labs
 // come from the health reports and the jobs; data/labs.json (optional) adds
-// details and hides retired labs.
+// details and hides retired labs. Each lab also has its own page
+// (#/labs/<name>) to link to.
 
 import { fetchText, node } from "../api.js";
 import { health, recent } from "../inventory.js";
@@ -10,13 +11,24 @@ import { HEALTH_MAX_AGE_H, healthReason, labOf, labStats, placeLabel, platformAv
 import { emptyState, h, healthBadge, link, mount, route, stackTable, statusBadge, timeAgo } from "../ui.js";
 import { logView } from "./run.js";
 
-export async function labsView(root, state) {
-  const selected = route().query.get("lab");
+// #/labs lists all labs, #/labs/<name> shows one lab (a link to share).
+// The old #/labs?lab=<name> links are redirected to the lab's page.
+export async function labsView(root, state, name = null) {
+  const old = route().query.get("lab");
+  if (!name && old) {
+    // a new path: the hashchange renders the lab's page
+    location.replace(labLink(old));
+    return;
+  }
   const days = state.config.recent_days || 14;
   mount(root, h("p", { class: "muted" }, "Loading runs…"));
   const [inv, labHealth] = await Promise.all([recent(state), health()]);
-  for (const name of labHealth.keys()) {
-    if (!inv.labs.has(name) && !state.labsInfo[name]?.retired) inv.labs.set(name, { name, ...(state.labsInfo[name] || {}), platforms: new Set() });
+  for (const lab of labHealth.keys()) {
+    if (!inv.labs.has(lab) && !state.labsInfo[lab]?.retired) inv.labs.set(lab, { name: lab, ...(state.labsInfo[lab] || {}), platforms: new Set() });
+  }
+  if (name) {
+    labView(root, inv, labHealth, name, days);
+    return;
   }
   const labs = [...inv.labs.values()].sort((a, b) => a.name.localeCompare(b.name));
   const waiting = inv.runs.filter((r) => !labOf(r, inv.pools) && status(r) === "queued").length;
@@ -31,12 +43,26 @@ export async function labsView(root, state) {
     labs.length === 0
       ? emptyState("No labs yet", `No lab reported a device or ran a job in the last ${days} days.`)
       : h("div", { class: "lab-list" }, labs.map((lab) =>
-        labCard(lab, inv, labHealth.get(lab.name) || new Map(), lab.name === selected))));
-
-  document.getElementById(`lab-${selected}`)?.scrollIntoView({ block: "center" });
+        labCard(lab, inv, labHealth.get(lab.name) || new Map()))));
 }
 
-function labCard(lab, inv, devices, selected) {
+export const labLink = (name) => link(["labs", name]);
+
+// One lab on its own page
+function labView(root, inv, labHealth, name, days) {
+  const lab = inv.labs.get(name);
+  const crumbs = h("nav", { class: "crumbs", "aria-label": "Breadcrumb" },
+    h("a", { href: link(["labs"]) }, "Labs"), " / ", h("span", {}, name));
+  if (!lab) {
+    mount(root, crumbs, emptyState(`No lab ${name}`,
+      `This lab did not report a device or run a job in the last ${days} days.`,
+      h("a", { href: link(["labs"]) }, "All labs →")));
+    return;
+  }
+  mount(root, crumbs, labCard(lab, inv, labHealth.get(name) || new Map(), { page: true }));
+}
+
+function labCard(lab, inv, devices, { page = false } = {}) {
   // statistics from official runs; manual ones only counted
   const runs = inv.official.filter((r) => labOf(r, inv.pools) === lab.name);
   const manual = inv.runs.filter((r) => labOf(r, inv.pools) === lab.name).length - runs.length;
@@ -58,10 +84,10 @@ function labCard(lab, inv, devices, selected) {
   const lastReport = [...devices.values()].flat().map((d) => d.created).sort().pop();
   const last = [stats.last, lastReport].filter(Boolean).sort().pop();
   const problems = rows.filter((row) => row.report && !row.report.schedulable).length;
-  return h("section", { class: `lab-card${selected ? " selected" : ""}`, id: `lab-${lab.name}` },
+  return h("section", { class: "lab-card", id: `lab-${lab.name}` },
     h("header", { class: "lab-head" },
       h("div", {},
-        h("h2", {}, lab.name),
+        page ? h("h1", {}, lab.name) : h("h2", {}, h("a", { href: labLink(lab.name), title: "Link to this lab" }, lab.name)),
         lab.description || lab.maintainer ? h("p", { class: "muted" },
           lab.description || null, lab.description && lab.maintainer ? " · " : null,
           lab.maintainer ? ["Maintained by ", lab.url ? h("a", { href: lab.url }, lab.maintainer) : lab.maintainer] : null) : null),
@@ -125,7 +151,7 @@ export async function healthLogView(root, state, id, key = "test_log") {
   const head = [
     h("nav", { class: "crumbs", "aria-label": "Breadcrumb" },
       h("a", { href: link(["labs"]) }, "Labs"), " / ",
-      h("a", { href: link(["labs"], { lab: report.lab }) }, report.lab), " / ",
+      h("a", { href: labLink(report.lab) }, report.lab), " / ",
       h("a", { href: link(["device", report.platform]) }, report.platform), " / ",
       h("span", {}, "Health check")),
   ];

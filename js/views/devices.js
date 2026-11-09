@@ -176,5 +176,5 @@ function deviceRow(d, row, lanes, pools) {
 }
 
 function labsCell(d) {
-  return h("td", { class: "labs" }, d.labs.map((lab) => h("a", { class: "chip", href: link(["labs"], { lab }) }, lab)));
+  return h("td", { class: "labs" }, d.labs.map((lab) => h("a", { class: "chip", href: link(["labs", lab]) }, lab)));
 }

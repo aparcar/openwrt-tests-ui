@@ -14,6 +14,7 @@ backend of its own: plain HTML, CSS and ES modules that read the Maestro
 | `#/queue` | Jobs waiting for a lab or running |
 | `#/manual` | Runs scheduled by hand (`owci schedule`) |
 | `#/labs` | Labs, their devices and how many runs ended incomplete |
+| `#/labs/<name>` | One lab on its own page, to share (`#/labs?lab=<name>` redirects here) |
 | `#/targets` | OpenWrt targets with and without a device, to pick the next device to add |
 | `#/about` | What OpenWrt CI is and how to take part |
 

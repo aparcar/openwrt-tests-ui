@@ -34,7 +34,7 @@ export async function queueView(root, state) {
           h("tbody", {}, q.running.map((r) => h("tr", {},
             h("td", {}, h("a", { href: link(["device", r.platform]) }, name(r.platform))),
             h("td", {}, buildCell(r), " ", manualBadge(r, state.config.official)),
-            h("td", {}, h("a", { href: link(["labs"], { lab: labOf(r, inv.pools) }) }, labOf(r, inv.pools) || r.lab)),
+            h("td", {}, h("a", { href: link(["labs", labOf(r, inv.pools) || r.lab]) }, labOf(r, inv.pools) || r.lab)),
             h("td", {}, statusBadge("running", { compact: true }), " ", timeAgo(r.updated)),
             h("td", {}, timeAgo(r.timeout))))))))),
 
@@ -51,8 +51,8 @@ export async function queueView(root, state) {
                 name(g.platform) !== g.platform ? h("span", { class: "sub mono" }, g.platform) : null),
               h("td", {}, g.runs.map((r) => h("div", {}, buildCell(r), " ", manualBadge(r, state.config.official)))),
               h("td", {}, pinned.length
-                ? [h("span", { class: "muted" }, "only "), pinned.map((lab) => h("a", { class: "chip", href: link(["labs"], { lab }) }, lab))]
-                : labs.length ? labs.map((lab) => h("a", { class: "chip", href: link(["labs"], { lab }) }, lab))
+                ? [h("span", { class: "muted" }, "only "), pinned.map((lab) => h("a", { class: "chip", href: link(["labs", lab]) }, lab))]
+                : labs.length ? labs.map((lab) => h("a", { class: "chip", href: link(["labs", lab]) }, lab))
                   : h("span", { class: "chip warn" }, "no lab")),
               h("td", {}, timeAgo(g.runs[0].created)),
               h("td", {}, timeAgo(g.runs[0].timeout)));

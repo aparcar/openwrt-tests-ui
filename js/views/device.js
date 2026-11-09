@@ -32,12 +32,12 @@ export async function deviceView(root, state, platform) {
     h("section", { class: "facts" },
       h("div", { class: "fact" }, h("span", { class: "fact-label" }, "Labs"),
         h("span", { class: "fact-value" }, labs.length
-          ? labs.map((lab) => h("a", { class: "chip", href: link(["labs"], { lab }) }, lab))
+          ? labs.map((lab) => h("a", { class: "chip", href: link(["labs", lab]) }, lab))
           : h("span", { class: "muted" }, "none"))),
       reports.length ? h("div", { class: "fact" }, h("span", { class: "fact-label" }, "Health"),
         h("span", { class: "fact-value health-list" }, reports.map((r) => h("span", {},
           healthBadge(r), " ",
-          h("a", { href: link(["labs"], { lab: r.lab }) }, r.lab),
+          h("a", { href: link(["labs", r.lab]) }, r.lab),
           copies(r.lab) > 1 ? [" ", h("span", { class: "mono" }, placeLabel(r.place, r.lab))] : null,
           " ", timeAgo(r.created),
           r.offline || r.result !== "pass" ? h("span", { class: "sub" }, healthNote(r)) : null)))) : null,

@@ -56,7 +56,7 @@ export async function runView(root, state, id) {
       h("strong", {}, run.errorCode === "Infrastructure" ? "Lab problem: " : "Problem: "), run.errorMsg,
       run.errorCode === "Infrastructure" ? h("span", { class: "muted" }, " (not a firmware regression)") : null) : null,
     h("section", { class: "facts" },
-      fact("Lab", lab ? h("a", { href: link(["labs"], { lab }) }, lab) : h("span", { class: "muted" }, "waiting for a lab")),
+      fact("Lab", lab ? h("a", { href: link(["labs", lab]) }, lab) : h("span", { class: "muted" }, "waiting for a lab")),
       fact("Device", run.device ? h("span", { class: "mono" }, run.device) : "—"),
       fact("Firmware", ow.image ? h("span", { class: "mono wrap" }, ow.image) : "—"),
       fact("Commit", run.commit
