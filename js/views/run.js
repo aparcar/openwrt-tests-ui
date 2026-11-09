@@ -1,9 +1,10 @@
 // One run (job node): what was tested where, the result per test with its
 // own log, and links to the whole run's files.
 
-import { bootOfJob, buildOfJob, fetchText, jobsForPlatformBranch, node, proxiedArtifact, publicLinks, testsOfJob } from "../api.js";
-import { duration, isOfficial, labOf, logLines, reasonParts, releasesOf, safeUrl, status, summarize, testTree, toRun } from "../model.js";
+import { bootOfJob, buildOfJob, clearCache, fetchText, jobsForPlatformBranch, node, proxiedArtifact, publicLinks, testsOfJob } from "../api.js";
+import { duration, isOfficial, labOf, liveIndexUrl, logLines, reasonParts, releasesOf, safeUrl, status, summarize, testTree, toRun } from "../model.js";
 import { countsBar, emptyState, errorBox, h, link, mount, route, setQuery, statusBadge, timeAgo } from "../ui.js";
+import { liveSection } from "./live.js";
 import { scheduleBox } from "./schedule.js";
 
 export async function runView(root, state, id) {
@@ -29,6 +30,17 @@ export async function runView(root, state, id) {
   const at = lane.findIndex((r) => r.id === id);
   const older = at >= 0 ? lane[at + 1] : null;
   const newer = at > 0 ? lane[at - 1] : null;
+
+  // While it runs (and while its build builds): the live view, until the
+  // node is done; then this page again, with the results
+  const reload = () => {
+    clearCache();
+    if (route().parts[1] === id) runView(root, state, id);
+  };
+  const live = st === "running" && liveIndexUrl(job) && !tree.length
+    ? liveSection(job, { kind: "test", history, onDone: reload }) : null;
+  const buildLive = build && build.state !== "done" && liveIndexUrl(build)
+    ? liveSection(build, { kind: "build", onDone: reload }) : null;
 
   mount(root,
     h("nav", { class: "crumbs", "aria-label": "Breadcrumb" },
@@ -75,7 +87,9 @@ export async function runView(root, state, id) {
           ? h("a", { class: "file", href: link(["run", id, "file", key]) }, label) : null),
         fileLink("Firmware ↓", build?.artifacts?.firmware, ow.sha256 ? `sha256 ${ow.sha256}` : null),
         links.viewer ? h("a", { class: "file", href: links.viewer }, "Raw node in Maestro ↗") : null)),
-    h("section", {},
+    buildLive,
+    live,
+    live ? null : h("section", {},
       h("div", { class: "section-head" },
         h("h2", {}, "Tests"),
         h("div", { class: "pager" },

@@ -39,6 +39,12 @@ export const unfinishedJobs = () => maestro("/nodes/fast", { ...RUN, state__ne: 
 // devices each lab has and their health
 export const healthReports = () => maestro("/nodes/fast", { kind: "job", name: "healthcheck", created__gt: since() });
 
+// Forget cached answers, e.g. when a running job finished and its page
+// shows the results
+export function clearCache() {
+  cache.clear();
+}
+
 async function getJSON(url, cached = true) {
   const hit = cached && cache.get(url);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.data;
@@ -108,6 +114,32 @@ export async function fetchText(url) {
   const res = await fetch(proxiedArtifact(url));
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.text();
+}
+
+// --- live view (model.js: liveIndexUrl): polled, so never from a cache ---
+
+// A job or build node as it is now (node() caches for 30 s)
+export async function freshNode(id) {
+  const res = await fetch(`${cfg.maestro.replace(/\/$/, "")}/node/${encodeURIComponent(id)}`,
+    { cache: "no-store", headers: { Accept: "application/json" } });
+  if (!res.ok) throw new Error(`node ${id}: HTTP ${res.status}`);
+  return res.json();
+}
+
+// The index as text (model.parseLiveIndex), null if not there yet
+export async function liveIndexText(url) {
+  const res = await fetch(proxiedArtifact(url), { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.text();
+}
+
+// A chunk's bytes. Revalidated: a job the same lab runs again (after it was
+// given back) starts over at chunk 1
+export async function liveChunk(url) {
+  const res = await fetch(proxiedArtifact(url), { cache: "no-cache" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return new Uint8Array(await res.arrayBuffer());
 }
 
 export function publicLinks(jobId) {

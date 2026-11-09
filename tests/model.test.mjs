@@ -5,6 +5,7 @@ import { test } from "node:test";
 import {
   compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, placeLabel, platformAvailable, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
   reasonParts, STATUS, status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
+  buildSteps, consoleRange, durationHistory, liveChunkUrl, liveIndexUrl, liveStale, liveTests, parseLiveIndex, phaseLabel, remainingMs, stripTerminal, typicalRunMs,
 } from "../js/model.js";
 
 const job = (over = {}) => ({
@@ -391,4 +392,70 @@ test("healthReason drops pytest's framing", () => {
     "1 passed, 2 warnings, 1 error in 159.48s (0:02:39)");
   assert.equal(healthReason("maintenance: USB power issues"), "maintenance: USB power issues");
   assert.equal(healthReason(""), "");
+});
+
+// --- live view ---
+
+test("live view: where it is, its chunks, the index", () => {
+  const url = "https://storage.example.org/logs/lab/j1/live/index.json";
+  assert.equal(liveIndexUrl({ data: { misc: { live: url } } }), url);
+  assert.equal(liveIndexUrl({ artifacts: { live: url } }), url);
+  assert.equal(liveIndexUrl({ data: { misc: { live: "javascript:alert(1)" } } }), null);
+  assert.equal(liveIndexUrl({ data: {} }), null);
+  assert.equal(liveChunkUrl(url, "console", 12), "https://storage.example.org/logs/lab/j1/live/console/000012.txt");
+  assert.equal(parseLiveIndex('{"v":1,"logs":{}}').v, 1);
+  assert.equal(parseLiveIndex('{"v":1,"lo'), null); // caught while being replaced
+  assert.equal(parseLiveIndex('{"v":2,"logs":{}}'), null);
+  const now = Date.parse("2026-11-09T10:10:00Z");
+  assert.equal(liveStale({ done: false, updated: "2026-11-09T10:09:30Z" }, now), false);
+  assert.equal(liveStale({ done: false, updated: "2026-11-09T10:00:00Z" }, now), true);
+  assert.equal(liveStale({ done: true, updated: "2026-11-09T10:00:00Z" }, now), false);
+  assert.equal(phaseLabel("fetching"), "Downloading the firmware");
+  assert.equal(phaseLabel("toolchain"), "toolchain");
+});
+
+test("live view: tests with history and the time left", () => {
+  const leaf = (name, durationMs) => ({ name, durationMs });
+  const history = durationHistory([
+    [{ name: "base", tests: [leaf("test_shell", 30_000), leaf("test_ssh", 4_000)] }],
+    [{ name: "base", tests: [leaf("test_shell", 50_000), leaf("test_ssh", 6_000)] }],
+    [{ name: "base", tests: [leaf("test_shell", 40_000), leaf("test_ssh", null)] }],
+  ]);
+  assert.equal(history.get("base/test_shell"), 40_000);
+  assert.equal(history.get("base/test_ssh"), 5_000);
+
+  const now = Date.parse("2026-11-09T10:00:10Z");
+  const progress = {
+    current: "tests/test_base.py::test_ssh",
+    tests: [
+      { id: "tests/test_base.py::test_shell", module: "base", name: "test_shell", result: "pass", ms: 35_000, console: 0 },
+      { id: "tests/test_base.py::test_ssh", module: "base", name: "test_ssh", started: "2026-11-09T10:00:08Z", console: 900 },
+      { id: "tests/test_new.py::test_x", module: "new", name: "test_x" },
+    ],
+  };
+  const tests = liveTests(progress, history, now);
+  assert.deepEqual(tests.map((t) => t.state), ["done", "running", "pending"]);
+  assert.equal(tests[1].elapsedMs, 2_000);
+  assert.equal(tests[1].expectedMs, 5_000);
+  assert.equal(tests[2].expectedMs, null);
+  // running: 5 s expected - 2 s so far; new test: the median of known ones (22.5 s)
+  assert.equal(remainingMs(tests, history), 3_000 + 22_500);
+  assert.equal(remainingMs(tests, new Map()), null);
+  assert.deepEqual(consoleRange(progress.tests, "tests/test_base.py::test_shell"), [0, 900]);
+  assert.deepEqual(consoleRange(progress.tests, "tests/test_base.py::test_ssh"), [900, null]);
+  assert.equal(consoleRange(progress.tests, "tests/test_new.py::test_x"), null);
+  assert.equal(typicalRunMs([{ state: "done", durationMs: 100 }, { state: "done", durationMs: 300 },
+    { state: "available", durationMs: null }]), 200);
+});
+
+test("live view: build steps take until the next one", () => {
+  const steps = buildSteps({ steps: [
+    { name: "tools", started: "2026-11-09T10:00:00Z" },
+    { name: "toolchain", started: "2026-11-09T10:02:00Z" },
+  ] }, Date.parse("2026-11-09T10:05:00Z"));
+  assert.deepEqual(steps, [
+    { name: "tools", ms: 120_000, current: false },
+    { name: "toolchain", ms: 180_000, current: true },
+  ]);
+  assert.equal(stripTerminal("a\r\n\x1b[1;32mok\x1b[0m"), "a\nok");
 });

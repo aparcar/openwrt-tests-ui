@@ -240,6 +240,38 @@ pre.log {
   font: 0.8rem/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 pre.log.full { max-height: none; }
+/* --- live view: a running job or build (views/live.js) ----------------------- */
+
+.live { margin-bottom: 1.5rem; }
+.live h2 { display: flex; align-items: center; gap: 0.5rem; }
+.live-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--running); animation: pulse 1.4s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+.live-head p { margin: 0 0 0.75rem; }
+.live-cols { display: grid; grid-template-columns: minmax(16rem, 1fr) 2fr; gap: 1rem; align-items: start; }
+.live-list {
+  list-style: none; margin: 0; padding: 0.25rem 0; max-height: 36rem; overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow);
+}
+.live-item { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0.75rem; font-size: 0.88rem; }
+.live-item + .live-item { border-top: 1px solid var(--border); }
+.live-item > :last-child { margin-left: auto; white-space: nowrap; font-size: 0.82rem; }
+.live-item.s-pending { color: var(--muted); }
+.live-item.s-running, .live-item.is-running { background: var(--running-bg); }
+.live-item.is-selected { box-shadow: inset 3px 0 0 var(--accent); }
+.live-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge.s-pending { --st: var(--muted); --st-bg: transparent; }
+.live button.linklike { font: inherit; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; text-align: left; min-width: 0; }
+.live-item button.linklike { color: inherit; }
+.live-item button.linklike:hover .mono { color: var(--accent); text-decoration: underline; }
+.live-logs { min-width: 0; }
+.live-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; background: var(--surface); }
+.live-tabs .tab { font: inherit; font-size: 0.85rem; padding: 0.3rem 0.7rem; border: 0; background: none; color: var(--muted); cursor: pointer; }
+.live-tabs .tab + .tab { border-left: 1px solid var(--border); }
+.live-tabs .tab[aria-selected="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.live-filter:not(:empty) { font-size: 0.85rem; padding: 0 0 0.4rem; color: var(--muted); }
+pre.log.live-log { max-height: 36rem; min-height: 12rem; }
+@media (max-width: 900px) { .live-cols { grid-template-columns: 1fr; } .live-list { max-height: 18rem; } }
+
 .l-section { color: #8fa3b8; font-weight: 700; display: block; margin-top: 0.4rem; }
 .l-section:first-child { margin-top: 0; }
 .l-log { color: #8a96a3; }

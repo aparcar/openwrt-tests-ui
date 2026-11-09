@@ -328,13 +328,18 @@ export function reasonParts(text) {
 
 // --- logs ----------------------------------------------------------------------
 
+// Carriage returns and terminal escape codes (colours, cursor movement) from
+// the serial console, removed
+export function stripTerminal(text) {
+  return (text || "").replace(/\r/g, "")
+    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b[()][0-9A-B]|\x1b[=>78]/g, "");
+}
+
 // A per-test log (agent: pytest junit_logging=all) or console log, line by
 // line. Console lines come as "CONSOLE    SerialDriver: <text>": shown as
 // the device printed them. kind: console, log, error, section or plain.
 export function logLines(text) {
-  return (text || "").replace(/\r/g, "")
-    // terminal escape codes (colours, cursor movement) from the serial console
-    .replace(/\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b[()][0-9A-B]|\x1b[=>78]/g, "")
+  return stripTerminal(text)
     .replace(/\n+$/, "").split("\n").map((line) => {
     const consoleLine = line.match(/^CONSOLE\s+[\w.]+: ?(.*)$/);
     if (consoleLine) return { kind: "console", text: consoleLine[1] };
@@ -344,6 +349,139 @@ export function logLines(text) {
     }
     if (/^(DEBUG|INFO|WARNING)\s/.test(line)) return { kind: "log", text: line };
     return { kind: "plain", text: line };
+  });
+}
+
+// --- live view: a running job or build -------------------------------------------
+
+// While a lab runs a job (or a build agent builds), it uploads the new part
+// of each log every few seconds as numbered chunks next to an index.json
+// (deploy/DATA.md, "Live view"): logs.<name>.chunks, done, and progress
+// (tests and their results; for builds the steps). The job points at it in
+// data.misc.live, the kbuild in artifacts.live, until they are done.
+
+// The index may be older than this while the job runs: then the lab or
+// agent most likely stopped (or lost its connection)
+export const LIVE_STALE_MS = 2 * 60_000;
+
+export function liveIndexUrl(node) {
+  return safeUrl(node?.data?.misc?.live || node?.artifacts?.live || null);
+}
+
+// chunk n (from 1) of a log next to the index
+export function liveChunkUrl(indexUrl, log, n) {
+  return indexUrl.replace(/index\.json$/, `${encodeURIComponent(log)}/${String(n).padStart(6, "0")}.txt`);
+}
+
+// null for what isn't an index: it is replaced on every update, so a read
+// can catch it half-written (then the next poll gets it whole)
+export function parseLiveIndex(text) {
+  try {
+    const index = JSON.parse(text);
+    return index && index.v === 1 && index.logs && typeof index.logs === "object" ? index : null;
+  } catch {
+    return null;
+  }
+}
+
+export function liveStale(index, now = Date.now()) {
+  return Boolean(index && !index.done && index.updated && now - parseTime(index.updated) > LIVE_STALE_MS);
+}
+
+const PHASES = {
+  fetching: "Downloading the firmware",
+  starting: "Starting",
+  testing: "Testing",
+  reporting: "Reporting the results",
+  failed: "Stopped by a lab problem",
+  cancelled: "Stopped, back in the queue",
+  stopped: "Stopped, back in the queue",
+  done: "Finished",
+};
+
+// builds: the step's own name (build.sh: "toolchain", "packages", ...)
+export const phaseLabel = (phase) => PHASES[phase] || phase || "";
+
+function median(values) {
+  const s = [...values].sort((a, b) => a - b);
+  if (!s.length) return null;
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+// Earlier runs' test trees (testTree) -> "module/name" -> typical duration
+// (median ms): what to expect of each test in a run of the same device
+export function durationHistory(trees) {
+  const all = new Map();
+  for (const tree of trees) {
+    for (const m of tree) {
+      for (const t of m.tests) {
+        if (t.durationMs == null) continue;
+        const key = `${m.name}/${t.name}`;
+        if (!all.has(key)) all.set(key, []);
+        all.get(key).push(t.durationMs);
+      }
+    }
+  }
+  return new Map([...all].map(([key, values]) => [key, median(values)]));
+}
+
+// The live view's tests in pytest's order: done (with result and time),
+// running (and for how long), pending; each with what it usually takes
+export function liveTests(progress, history = new Map(), now = Date.now()) {
+  return (progress?.tests || []).map((t) => {
+    const state = t.result ? "done" : t.id === progress.current ? "running" : "pending";
+    return {
+      id: t.id,
+      module: t.module,
+      name: t.name,
+      state,
+      result: t.result || null,
+      ms: t.ms ?? null,
+      expectedMs: history.get(`${t.module}/${t.name}`) ?? null,
+      elapsedMs: state === "running" && t.started ? Math.max(0, now - parseTime(t.started)) : null,
+      console: t.console ?? null,
+    };
+  });
+}
+
+// Time left (ms): what the tests still to come usually take (a test that
+// never ran before counts as a typical one), plus what the running one
+// likely still needs. null without any history.
+export function remainingMs(tests, history) {
+  const typical = median([...(history?.values() || [])]);
+  if (typical == null) return null;
+  let left = 0;
+  for (const t of tests) {
+    if (t.state === "pending") left += t.expectedMs ?? typical;
+    else if (t.state === "running") left += Math.max(0, (t.expectedMs ?? typical) - (t.elapsedMs || 0));
+  }
+  return left;
+}
+
+// How long runs of the device usually take (median of earlier finished
+// runs), for before pytest has listed its tests
+export function typicalRunMs(runs) {
+  return median(runs.filter((r) => r.state === "done" && r.durationMs).map((r) => r.durationMs));
+}
+
+// The part of the console log of one test: [start, end) in bytes, end null
+// for the last one (up to the end of the log so far)
+export function consoleRange(tests, id) {
+  const i = tests.findIndex((t) => t.id === id);
+  if (i < 0 || tests[i].console == null) return null;
+  const next = tests.slice(i + 1).find((t) => t.console != null);
+  return [tests[i].console, next ? next.console : null];
+}
+
+// A build's steps (build.sh's "==> step" lines) and how long each took:
+// until the next one began, the last one until `end` (now while it builds)
+export function buildSteps(progress, end = Date.now()) {
+  const steps = progress?.steps || [];
+  return steps.map((s, i) => {
+    const from = parseTime(s.started);
+    const to = i + 1 < steps.length ? parseTime(steps[i + 1].started) : end;
+    return { name: s.name, ms: Math.max(0, to - from), current: i === steps.length - 1 };
   });
 }
 
