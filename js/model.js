@@ -80,6 +80,8 @@ export const STATUS = {
   fail: { label: "Failed", icon: "✕", rank: 4 },
   incomplete: { label: "Incomplete", icon: "!", rank: 3 },
   skip: { label: "Skipped", icon: "–", rank: 0 },
+  // tests only: a known failure (pytest xfail), the reason says which issue
+  xfail: { label: "Expected failure", icon: "⚑", rank: 0.5 },
   running: { label: "Running", icon: "◷", rank: 2 },
   queued: { label: "Queued", icon: "…", rank: 2 },
   none: { label: "No run", icon: "", rank: -1 },
@@ -259,7 +261,9 @@ export function testTree(modules, testsByModule) {
         .map((t) => ({
           id: t.id,
           name: t.name,
-          result: t.result,
+          // an xfail is stored as skip with data.misc.outcome (Maestro has no
+          // xfail result); its error_msg is the reason, e.g. the known issue
+          result: t.data?.misc?.outcome === "xfail" ? "xfail" : t.result,
           durationMs: t.data?.misc?.duration_ms ?? t.data?.duration_ms ?? null,
           errorMsg: t.data?.error_msg || null,
           // its own log (agent: one log per test); older runs have none
@@ -289,18 +293,37 @@ export function testProperties(properties) {
     .sort(([a], [b]) => a.localeCompare(b));
 }
 
+// xfailed are counted in skipped as well, like the agent's data.misc.summary
 export function summarize(tree) {
-  const s = { total: 0, passed: 0, failed: 0, skipped: 0, errors: 0 };
+  const s = { total: 0, passed: 0, failed: 0, skipped: 0, xfailed: 0, errors: 0 };
   for (const m of tree) {
     for (const t of m.tests) {
       s.total++;
       if (t.result === "pass") s.passed++;
       else if (t.result === "fail") s.failed++;
       else if (t.result === "skip") s.skipped++;
+      else if (t.result === "xfail") { s.skipped++; s.xfailed++; }
       else s.errors++;
     }
   }
   return s;
+}
+
+// A skip or xfail reason with its issue references as links:
+// [{ text }, { text, url }, ...]. "openwrt/openwrt#123", "owner/repo#123" and
+// a bare "#123" (openwrt/openwrt) link to GitHub; the rest is plain text.
+export function reasonParts(text) {
+  const parts = [];
+  const re = /(?<![\w/#])(?:([\w.-]+\/[\w.-]+))?#(\d+)\b/g;
+  let last = 0;
+  for (const m of String(text || "").matchAll(re)) {
+    if (m.index > last) parts.push({ text: text.slice(last, m.index) });
+    const repo = m[1] || "openwrt/openwrt";
+    parts.push({ text: m[0], url: `https://github.com/${repo}/issues/${m[2]}` });
+    last = m.index + m[0].length;
+  }
+  if (last < String(text || "").length) parts.push({ text: text.slice(last) });
+  return parts;
 }
 
 // --- logs ----------------------------------------------------------------------

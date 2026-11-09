@@ -2,7 +2,7 @@
 // own log, and links to the whole run's files.
 
 import { bootOfJob, buildOfJob, fetchText, jobsForPlatformBranch, node, proxiedArtifact, publicLinks, testsOfJob } from "../api.js";
-import { duration, isOfficial, labOf, logLines, releasesOf, safeUrl, status, summarize, testTree, toRun } from "../model.js";
+import { duration, isOfficial, labOf, logLines, reasonParts, releasesOf, safeUrl, status, summarize, testTree, toRun } from "../model.js";
 import { countsBar, emptyState, errorBox, h, link, mount, route, setQuery, statusBadge, timeAgo } from "../ui.js";
 import { scheduleBox } from "./schedule.js";
 
@@ -166,27 +166,39 @@ function testList(tree, st, selected) {
           h("span", { class: "module-name" }, m.name),
           h("span", { class: "muted module-counts" }, `${s.passed}/${s.total} passed`,
             s.failed ? h("span", { class: "t-fail" }, ` · ${s.failed} failed`) : null,
-            s.skipped ? ` · ${s.skipped} skipped` : null)),
+            s.skipped - s.xfailed ? ` · ${s.skipped - s.xfailed} skipped` : null,
+            s.xfailed ? ` · ${s.xfailed} expected to fail` : null)),
         h("ul", { class: "tests" }, [...m.tests].sort((a, b) => failedFirst(a, b) || a.name.localeCompare(b.name)).map((t) => testItem(t, t.id === selected))));
     }));
 }
 
-const rank = (result) => ({ fail: 3, incomplete: 2, error: 2, pass: 1, skip: 0 }[result] ?? 2);
+const rank = (result) => ({ fail: 3, incomplete: 2, error: 2, xfail: 1.5, pass: 1, skip: 0 }[result] ?? 2);
+
+// Why a test was skipped or is expected to fail, issue references linked
+function testReason(t) {
+  const known = t.result === "xfail";
+  return h("p", { class: `test-reason${known ? " r-xfail" : ""}` },
+    h("strong", {}, known ? "Expected to fail: " : "Skipped: "),
+    reasonParts(t.errorMsg).map((p) => (p.url ? h("a", { href: p.url }, p.text) : p.text)),
+    known ? h("span", { class: "muted" }, " (a known problem, not counted as a failure)") : null);
+}
 
 function testItem(t, selected) {
   const logHost = h("div", { class: "log-host" });
   let loaded = false;
-  const item = h("details", { class: "test" },
+  const informational = t.result === "skip" || t.result === "xfail";
+  const item = h("details", { class: `test c-${t.result || "incomplete"}` },
     h("summary", {},
       statusBadge(t.result || "incomplete", { compact: true }),
       h("span", { class: "mono test-name" }, t.name),
-      // failure reason in red, skip reason muted
-      t.errorMsg ? h("span", { class: `test-error${t.result === "skip" ? "" : " t-fail"}`, title: t.errorMsg },
+      // failure reason in red, skip and xfail reason muted
+      t.errorMsg ? h("span", { class: `test-error${informational ? "" : " t-fail"}`, title: t.errorMsg },
         t.errorMsg.split("\n")[0]) : null,
       h("span", { class: "grow" }),
       t.properties.length ? h("span", { class: "chip plain", title: "Values the test recorded" },
         `${t.properties.length} value${t.properties.length === 1 ? "" : "s"}`) : null,
       h("span", { class: "muted" }, t.durationMs != null ? duration(t.durationMs) : "")));
+  if (informational && t.errorMsg) item.append(testReason(t));
   if (t.properties.length) item.append(propertiesTable(t.properties));
   item.append(logHost);
   item.addEventListener("toggle", async () => {

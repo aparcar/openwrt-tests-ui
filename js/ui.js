@@ -57,7 +57,11 @@ export function countsBar(summary) {
   if (!summary || !summary.total) return h("span", { class: "muted" }, "—");
   const pct = (n) => `${(100 * n) / summary.total}%`;
   const failed = (summary.failed || 0) + (summary.errors || 0);
-  return h("span", { class: "counts", title: `${summary.passed} passed, ${failed} failed, ${summary.skipped} skipped` },
+  // xfailed (expected failures) are part of skipped
+  const xfailed = summary.xfailed || 0;
+  const title = `${summary.passed} passed, ${failed} failed, ${summary.skipped - xfailed} skipped`
+    + (xfailed ? `, ${xfailed} expected to fail` : "");
+  return h("span", { class: "counts", title },
     h("span", { class: "bar", "aria-hidden": "true" },
       h("span", { class: "seg s-pass", style: `width:${pct(summary.passed)}` }),
       h("span", { class: "seg s-fail", style: `width:${pct(failed)}` }),

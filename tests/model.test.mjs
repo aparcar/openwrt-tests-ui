@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 import {
   compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, placeLabel, platformAvailable, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
-  status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
+  reasonParts, STATUS, status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
 } from "../js/model.js";
 
 const job = (over = {}) => ({
@@ -87,7 +87,36 @@ test("testTree and summarize", () => {
   );
   assert.deepEqual(tree[0].tests.map((t) => t.name), ["test_backup", "test_shell", "test_ssh"]);
   assert.equal(tree[0].tests[2].errorMsg, "timeout");
-  assert.deepEqual(summarize(tree), { total: 3, passed: 1, failed: 1, skipped: 1, errors: 0 });
+  assert.deepEqual(summarize(tree), { total: 3, passed: 1, failed: 1, skipped: 1, xfailed: 0, errors: 0 });
+});
+
+test("xfail: a skip with data.misc.outcome, counted in skipped too", () => {
+  const [m] = testTree([{ id: "m", name: "tls", result: "pass" }], { m: [
+    { id: "t1", name: "test_revoked", result: "skip",
+      data: { error_msg: "uclient-fetch checks no revocation", misc: { outcome: "xfail" } } },
+    { id: "t2", name: "test_valid", result: "pass", data: {} },
+    { id: "t3", name: "test_wifi", result: "skip", data: { error_msg: "no wifi" } },
+  ] });
+  assert.equal(m.tests[0].result, "xfail");
+  assert.equal(m.tests[0].errorMsg, "uclient-fetch checks no revocation");
+  assert.equal(m.tests[2].result, "skip");
+  assert.deepEqual(summarize([m]), { total: 3, passed: 1, failed: 0, skipped: 2, xfailed: 1, errors: 0 });
+  assert.ok(STATUS.xfail.label);
+});
+
+test("reasonParts links issue references", () => {
+  assert.deepEqual(reasonParts("openwrt/openwrt#10804: odhcpd ignores it"), [
+    { text: "openwrt/openwrt#10804", url: "https://github.com/openwrt/openwrt/issues/10804" },
+    { text: ": odhcpd ignores it" },
+  ]);
+  assert.deepEqual(reasonParts("took down the radio (#24625)"), [
+    { text: "took down the radio (" },
+    { text: "#24625", url: "https://github.com/openwrt/openwrt/issues/24625" },
+    { text: ")" },
+  ]);
+  assert.deepEqual(reasonParts("no issue yet"), [{ text: "no issue yet" }]);
+  assert.deepEqual(reasonParts("a#1 x"), [{ text: "a#1 x" }]);
+  assert.deepEqual(reasonParts(null), []);
 });
 
 test("test properties: sorted, JSON lists joined, other values as they are", () => {
