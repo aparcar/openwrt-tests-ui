@@ -165,6 +165,13 @@ test("inventory: a configured pool before anything was claimed", () => {
   assert.equal(inventory(runs, {}, ["openwrt-labs"]).labs.has("openwrt-labs"), false);
 });
 
+test("inventory: a retired lab is left out despite recent runs", () => {
+  const runs = [toRun(job({ data: { runtime: "old-qemu" } })), toRun(job({ id: "b", data: { runtime: "aparcar" } }))];
+  const inv = inventory(runs, { "old-qemu": { retired: true } });
+  assert.deepEqual([...inv.labs.keys()], ["aparcar"]);
+  assert.deepEqual([...inv.devices.get(runs[0].platform).labs], ["aparcar"]);
+});
+
 test("queue: running jobs, waiting ones per device, devices without a lab first", () => {
   const runs = [
     toRun(job({ id: "run", state: "available", result: null, created: "2026-10-06T09:00:00" })),

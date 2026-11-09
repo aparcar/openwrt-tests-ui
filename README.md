@@ -46,7 +46,8 @@ CORS headers. `--data <dir>` uses another `data/` directory.
 | `targets` | All OpenWrt targets, `"<target>/<subtarget>": "<arch>"`, for the targets page; update it when OpenWrt adds or drops targets |
 
 `data/labs.json` (optional) adds a description, maintainer and url per lab
-and lists labs that haven't run anything yet.
+and lists labs that haven't run anything yet. `"retired": true` hides a lab
+that was removed (its runs stay, but it is no longer listed).
 
 ## Code
 

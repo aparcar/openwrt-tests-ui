@@ -108,7 +108,8 @@ export function safeUrl(url) {
 // took from the pool remember it in data.pool, so the pool is not a lab.
 // labsInfo (optional data/labs.json) adds description/maintainer/url per lab
 // and lists labs that have not run anything yet; knownPools (config.pool)
-// covers a pool nothing was claimed from yet.
+// covers a pool nothing was claimed from yet. Labs marked "retired" there
+// are left out, even while their old runs are still recent.
 export function inventory(runs, labsInfo = {}, knownPools = []) {
   const pools = new Set([...knownPools, ...runs.map((r) => r.pool)].filter(Boolean));
   const devices = new Map();
@@ -117,7 +118,7 @@ export function inventory(runs, labsInfo = {}, knownPools = []) {
     if (!labs.has(name)) labs.set(name, { name, ...(labsInfo[name] || {}), platforms: new Set() });
     return labs.get(name);
   };
-  Object.keys(labsInfo).forEach(addLab);
+  Object.keys(labsInfo).filter((name) => !labsInfo[name].retired).forEach(addLab);
   for (const run of [...runs].sort(byNewest)) {
     if (!run.platform) continue;
     // newest first: the latest job's device details win; jobs without them
@@ -133,7 +134,7 @@ export function inventory(runs, labsInfo = {}, knownPools = []) {
     d.profile ??= run.profile;
     d.features ??= run.features;
     const lab = labOf(run, pools);
-    if (lab) {
+    if (lab && !labsInfo[lab]?.retired) {
       addLab(lab).platforms.add(run.platform);
       devices.get(run.platform).labs.add(lab);
     }

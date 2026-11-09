@@ -4,6 +4,9 @@
       "description": "Hardware in Paul's lab",
       "maintainer": "aparcar",
       "url": "https://github.com/aparcar"
+    },
+    "openwrtci-qemu": {
+      "retired": true
     }
   }
 }

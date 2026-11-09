@@ -2,7 +2,7 @@
 // reports, like LAVA's device list), the latest official run per device, and
 // how many runs ended in lab problems (incomplete) rather than results. Labs
 // come from the health reports and the jobs; data/labs.json (optional) adds
-// details.
+// details and hides retired labs.
 
 import { fetchText, node } from "../api.js";
 import { health, recent } from "../inventory.js";
@@ -16,7 +16,7 @@ export async function labsView(root, state) {
   mount(root, h("p", { class: "muted" }, "Loading runs…"));
   const [inv, labHealth] = await Promise.all([recent(state), health()]);
   for (const name of labHealth.keys()) {
-    if (!inv.labs.has(name)) inv.labs.set(name, { name, ...(state.labsInfo[name] || {}), platforms: new Set() });
+    if (!inv.labs.has(name) && !state.labsInfo[name]?.retired) inv.labs.set(name, { name, ...(state.labsInfo[name] || {}), platforms: new Set() });
   }
   const labs = [...inv.labs.values()].sort((a, b) => a.name.localeCompare(b.name));
   const waiting = inv.runs.filter((r) => !labOf(r, inv.pools) && status(r) === "queued").length;
