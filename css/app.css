@@ -246,6 +246,10 @@ pre.log {
   font: 0.8rem/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere;
 }
 pre.log.full { max-height: none; }
+/* a failed test: its whole failure, the log folded below it */
+pre.log.failure { max-height: none; margin-top: 0.4rem; }
+details.test-log > summary { padding: 0.5rem 0 0.1rem; font-size: 0.85rem; color: var(--muted); cursor: pointer; }
+details.test-log > summary:hover { color: var(--text); }
 /* --- running jobs: the same parts as finished ones, plus these ---------------- */
 
 .live-line { margin: 0.25rem 0 0; font-size: 0.9rem; color: var(--running); font-weight: 600; }

@@ -9,7 +9,7 @@
 import { bootOfJob, buildOfJob, clearCache, fetchText, jobsForPlatformBranch, node, proxiedArtifact, publicLinks, testsOfJob } from "../api.js";
 import {
   bootTest, duration, isOfficial, labOf, liveIndexUrl, liveTree, logLines, parseTime, releasesOf, remainingMs, safeUrl,
-  status, summarize, testTree, toRun,
+  splitFailure, status, summarize, testTree, toRun,
 } from "../model.js";
 import { countsBar, emptyState, errorBox, h, link, mount, route, statusBadge, timeAgo } from "../ui.js";
 import { buildSection, followingLog, liveHeadline, LiveRun } from "./live.js";
@@ -198,13 +198,35 @@ function flat(tree) {
   })));
 }
 
-// A finished test's own log (agent: one per test); older runs have none
-async function finishedLog(t) {
+// A finished test's own log (agent: one per test); older runs have none.
+// A failed test shows its whole failure first, the log below on request.
+export async function finishedLog(t) {
+  const failed = t.result === "fail" || t.result === "incomplete";
   if (!t.logUrl) {
-    return h("p", { class: "muted" },
-      "No log of its own (runs before the per-test logs only have the whole run's console log, see Files).");
+    return h("div", {},
+      failed && t.errorMsg ? failureView(t.errorMsg) : null,
+      h("p", { class: "muted" },
+        "No log of its own (runs before the per-test logs only have the whole run's console log, see Files)."));
   }
-  return logView(await fetchText(t.logUrl), t.logUrl);
+  const text = await fetchText(t.logUrl);
+  if (!failed) return logView(text, t.logUrl);
+  const { failure, log } = splitFailure(text);
+  const shown = failure || t.errorMsg;
+  if (!shown) return logView(text, t.logUrl);
+  const rest = failure ? log : text;
+  const lines = rest.trim() ? rest.split("\n").length : 0;
+  const more = h("details", { class: "test-log" }, h("summary", {}, `Log (${lines} lines)`));
+  more.addEventListener("toggle", () => {
+    if (more.open && more.children.length === 1) more.append(logView(rest, t.logUrl));
+  });
+  return h("div", {}, failureView(shown, !failure), lines ? more : null);
+}
+
+// A failure in full: a traceback with its "E " lines in red, or (no
+// traceback in the log) the message, all red
+function failureView(text, message = false) {
+  return h("pre", { class: "log failure" },
+    logLines(text).map((l) => h("span", { class: message || l.kind === "error" ? "l-error" : "l-plain" }, l.text, "\n")));
 }
 
 // The boot: its result and its log. The device boots in the setup of the

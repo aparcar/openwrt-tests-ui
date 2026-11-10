@@ -6,7 +6,7 @@ import {
   compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, placeLabel, platformAvailable, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
   reasonParts, STATUS, status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
   buildSteps, consoleRange, durationHistory, liveChunkUrl, liveIndexUrl, liveStale, liveTests, parseLiveIndex, phaseLabel, remainingMs, stripTerminal, typicalRunMs,
-  bootTest, liveTree, moduleResult,
+  bootTest, liveTree, moduleResult, splitFailure,
 } from "../js/model.js";
 
 const job = (over = {}) => ({
@@ -165,6 +165,16 @@ test("logLines: console lines without their prefix, errors marked", () => {
   assert.deepEqual(logLines(""), [{ kind: "plain", text: "" }]);
 });
 
+test("logLines: labgrid's serial records as the device printed them, writes left out", () => {
+  const lines = logLines([
+    "CONSOLE SerialLogger.ma:    SerialDriver(main) < NOTICE:  BL2: v2.10.0␍␤",
+    "CONSOLE SerialLogger.ma:    SerialDriver(main) > uname -a␤",
+    "CONSOLE SerialLogger.ma:    SerialDriver(main) < ␤␍F0: 102B 0000␤␍Jump to BL␤␍␤",
+  ].join("\n"));
+  assert.deepEqual(lines.map((l) => l.text), ["NOTICE:  BL2: v2.10.0", "", "F0: 102B 0000", "Jump to BL", ""]);
+  assert.ok(lines.every((l) => l.kind === "console"));
+});
+
 test("labStats counts runs and the share of infrastructure failures", () => {
   const stats = labStats([
     toRun(job({ id: "a", result: "pass", updated: "2026-10-06T12:00:00" })),
@@ -239,6 +249,27 @@ test("relativeTime in the future", () => {
 test("logLines strips terminal escape codes", () => {
   const lines = logLines("\x1b[0;32mOK\x1b[0m done\r\n\x1b[?25lroot@OpenWrt:~# ");
   assert.deepEqual(lines.map((l) => l.text), ["OK done", "root@OpenWrt:~# "]);
+});
+
+test("splitFailure: the traceback after the captured sections", () => {
+  const text = [
+    "----------------------------- Captured Log -----------------------------",
+    "INFO     step",
+    "CONSOLE  SerialDriver: wifi.py:12: in x (console, not the failure)",
+    "----------------------------- Captured Out -----------------------------",
+    "printed",
+    "",
+    "test_wifi_clients.py:357: in test_wifi_clients_isolation",
+    "    assert received == 0, (",
+    "E   AssertionError: isolated client reached its peer",
+    "E     probe: {",
+    "",
+  ].join("\n");
+  const { failure, log } = splitFailure(text);
+  assert.equal(failure.split("\n")[0], "test_wifi_clients.py:357: in test_wifi_clients_isolation");
+  assert.equal(failure.split("\n").at(-1), "E     probe: {");
+  assert.equal(log.split("\n").at(-1), "printed");
+  assert.deepEqual(splitFailure("INFO     only a log"), { failure: null, log: "INFO     only a log" });
 });
 
 test("releasesOf: main snapshot first, then branch snapshots, then releases", () => {

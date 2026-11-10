@@ -360,13 +360,23 @@ export function stripTerminal(text) {
 }
 
 // A per-test log (agent: pytest junit_logging=all) or console log, line by
-// line. Console lines come as "CONSOLE    SerialDriver: <text>": shown as
-// the device printed them. kind: console, log, error, section or plain.
+// line. kind: console, log, error, section or plain.
+//
+// Console lines are labgrid's log records of what it read from the serial
+// port, "CONSOLE SerialLogger.ma:    SerialDriver(main) < <text>␍␤", or
+// wrote to it ("> "): shown as the device printed them. Writes are left
+// out (the device echoes them); ␍ goes, ␤ ends a line.
 export function logLines(text) {
   return stripTerminal(text)
-    .replace(/\n+$/, "").split("\n").map((line) => {
+    .replace(/\n+$/, "").split("\n").flatMap((line) => {
     const consoleLine = line.match(/^CONSOLE\s+[\w.]+: ?(.*)$/);
-    if (consoleLine) return { kind: "console", text: consoleLine[1] };
+    if (consoleLine) {
+      const record = consoleLine[1].match(/^\s*\w+\([^)]*\) ([<>]) ?(.*)$/);
+      if (!record) return [{ kind: "console", text: consoleLine[1] }];
+      if (record[1] === ">") return [];
+      const printed = record[2].replace(/␍/g, "").replace(/␤$/, "");
+      return printed.split("␤").map((part) => ({ kind: "console", text: part }));
+    }
     if (/^-{5,} .* -{5,}$/.test(line)) return { kind: "section", text: line.replace(/^-+ | -+$/g, "") };
     if (/^(ERROR|CRITICAL)\s/.test(line) || /^E\s{2,}/.test(line) || /^Traceback /.test(line)) {
       return { kind: "error", text: line };
@@ -374,6 +384,21 @@ export function logLines(text) {
     if (/^(DEBUG|INFO|WARNING)\s/.test(line)) return { kind: "log", text: line };
     return { kind: "plain", text: line };
   });
+}
+
+// A failed test's log split into its failure (the traceback the agent puts
+// last, pytest --tb=short: starts with "<file>.py:<line>: in <function>")
+// and the captured output before it. failure: null when there is none.
+export function splitFailure(text) {
+  const lines = stripTerminal(text).replace(/\n+$/, "").split("\n");
+  let start = 0;
+  lines.forEach((line, i) => { if (/^-{5,} .* -{5,}$/.test(line)) start = i + 1; });
+  const at = lines.findIndex((line, i) => i >= start && /^\S+\.py:\d+: in \S/.test(line));
+  if (at < 0) return { failure: null, log: text };
+  return {
+    failure: lines.slice(at).join("\n"),
+    log: lines.slice(0, at).join("\n").replace(/\n+$/, ""),
+  };
 }
 
 // --- live view: a running job or build -------------------------------------------
