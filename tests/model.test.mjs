@@ -6,6 +6,7 @@ import {
   compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, placeLabel, platformAvailable, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
   reasonParts, STATUS, status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
   buildSteps, consoleRange, durationHistory, liveChunkUrl, liveIndexUrl, liveStale, liveTests, parseLiveIndex, phaseLabel, remainingMs, stripTerminal, typicalRunMs,
+  bootTest, liveTree, moduleResult,
 } from "../js/model.js";
 
 const job = (over = {}) => ({
@@ -86,9 +87,21 @@ test("testTree and summarize", () => {
       { id: "t3", name: "test_backup", result: "skip", data: {} },
     ] },
   );
-  assert.deepEqual(tree[0].tests.map((t) => t.name), ["test_backup", "test_shell", "test_ssh"]);
-  assert.equal(tree[0].tests[2].errorMsg, "timeout");
-  assert.deepEqual(summarize(tree), { total: 3, passed: 1, failed: 1, skipped: 1, xfailed: 0, errors: 0 });
+  // in the order they ran (Maestro's creation order), not by name
+  assert.deepEqual(tree[0].tests.map((t) => t.name), ["test_ssh", "test_shell", "test_backup"]);
+  assert.equal(tree[0].tests[0].errorMsg, "timeout");
+  assert.deepEqual(summarize(tree), { total: 3, passed: 1, failed: 1, skipped: 1, xfailed: 0, errors: 0, pending: 0 });
+});
+
+test("bootTest: the first test that ran, its log starts with the boot", () => {
+  const tree = testTree(
+    [{ id: "m0", name: "empty" }, { id: "m1", name: "base" }, { id: "m2", name: "apk" }],
+    { m1: [{ id: "t1", name: "test_shell", result: "pass", data: {} }, { id: "t2", name: "test_ssh", data: {} }],
+      m2: [{ id: "t3", name: "test_apk_add", data: {} }] },
+  );
+  assert.deepEqual(tree.map((m) => m.name), ["empty", "base", "apk"]);
+  assert.equal(bootTest(tree).name, "test_shell");
+  assert.equal(bootTest([]), null);
 });
 
 test("xfail: a skip with data.misc.outcome, counted in skipped too", () => {
@@ -101,7 +114,7 @@ test("xfail: a skip with data.misc.outcome, counted in skipped too", () => {
   assert.equal(m.tests[0].result, "xfail");
   assert.equal(m.tests[0].errorMsg, "uclient-fetch checks no revocation");
   assert.equal(m.tests[2].result, "skip");
-  assert.deepEqual(summarize([m]), { total: 3, passed: 1, failed: 0, skipped: 2, xfailed: 1, errors: 0 });
+  assert.deepEqual(summarize([m]), { total: 3, passed: 1, failed: 0, skipped: 2, xfailed: 1, errors: 0, pending: 0 });
   assert.ok(STATUS.xfail.label);
 });
 
@@ -446,6 +459,50 @@ test("live view: tests with history and the time left", () => {
   assert.equal(consoleRange(progress.tests, "tests/test_new.py::test_x"), null);
   assert.equal(typicalRunMs([{ state: "done", durationMs: 100 }, { state: "done", durationMs: 300 },
     { state: "available", durationMs: null }]), 200);
+});
+
+test("live view: the same tree as the results, so both pages look alike", () => {
+  const now = Date.parse("2026-11-09T10:00:10Z");
+  const progress = {
+    current: "tests/test_wifi.py::TestAp::test_scan[2g]",
+    tests: [
+      { id: "tests/test_wifi.py::TestAp::test_scan[5g]", module: "wifi", name: "test_scan[5g]", result: "pass", ms: 2_000 },
+      { id: "tests/test_wifi.py::TestAp::test_scan[2g]", module: "wifi", name: "test_scan[2g]", started: "2026-11-09T10:00:07Z", console: 10 },
+      { id: "tests/test_base.py::test_shell", module: "base", name: "test_shell", result: "fail", ms: 40_000,
+        message: "AssertionError: no shell" },
+      { id: "tests/test_base.py::test_ssh", module: "base", name: "test_ssh" },
+    ],
+  };
+  const tree = liveTree(progress, new Map([["wifi/test_scan[2g]", 4_000]]), now);
+  // modules and tests in pytest's order, like testTree
+  assert.deepEqual(tree.map((m) => m.name), ["wifi", "base"]);
+  assert.deepEqual(tree[0].tests.map((t) => t.name), ["test_scan[5g]", "test_scan[2g]"]);
+  assert.deepEqual(tree.map((m) => m.result), ["running", "fail"]);
+  assert.equal(bootTest(tree).name, "test_scan[5g]");
+  const running = tree[0].tests[1];
+  assert.equal(running.result, "running");
+  assert.equal(running.durationMs, 3_000);
+  assert.equal(running.expectedMs, 4_000);
+  assert.equal(running.console, 10);
+  assert.deepEqual(running.properties, []);
+  assert.equal(tree[1].tests[1].result, "pending");
+  // the reason shows where the results' error_msg does
+  assert.equal(tree[1].tests[0].errorMsg, "AssertionError: no shell");
+  assert.equal(tree[1].tests[1].errorMsg, null);
+  // pending tests are counted apart, not as errors
+  const s = summarize(tree);
+  assert.deepEqual([s.total, s.passed, s.failed, s.errors, s.pending], [4, 1, 1, 0, 2]);
+});
+
+test("moduleResult: failures first, then running", () => {
+  const r = (...results) => moduleResult(results.map((result) => ({ result })));
+  assert.equal(r("pass", "fail", "running"), "fail");
+  assert.equal(r("pass", "running"), "running");
+  assert.equal(r("pass", "pending"), "running");
+  assert.equal(r("pending", "pending"), "pending");
+  assert.equal(r("pass", "skip"), "pass");
+  assert.equal(r("skip"), "skip");
+  assert.equal(r("xfail", "skip"), "pass");
 });
 
 test("live view: build steps take until the next one", () => {

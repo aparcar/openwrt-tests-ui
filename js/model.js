@@ -84,6 +84,8 @@ export const STATUS = {
   xfail: { label: "Expected failure", icon: "⚑", rank: 0.5 },
   running: { label: "Running", icon: "◷", rank: 2 },
   queued: { label: "Queued", icon: "…", rank: 2 },
+  // tests of a running job that have not run yet
+  pending: { label: "Not run yet", icon: "○", rank: -0.5 },
   none: { label: "No run", icon: "", rank: -1 },
 };
 
@@ -250,7 +252,9 @@ export function worstStatus(cells) {
 
 // --- tests -------------------------------------------------------------------
 
-// modules: child nodes of the job; testsByModule: module id -> its children
+// modules: child nodes of the job; testsByModule: module id -> its children.
+// In the order they ran: the agent creates the nodes in pytest's order and
+// Maestro returns them in creation order.
 export function testTree(modules, testsByModule) {
   return modules
     .map((m) => ({
@@ -270,10 +274,15 @@ export function testTree(modules, testsByModule) {
           logUrl: t.artifacts?.test_log || null,
           // what the test measured (record_property), name -> value
           properties: testProperties(t.data?.misc?.properties),
-        }))
-        .sort((a, b) => a.name.localeCompare(b.name)),
-    }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+        })),
+    }));
+}
+
+// The test the device booted in: the first one to run (its setup powers the
+// device on and waits for the shell, openwrt-tests runs test_shell first),
+// so its log starts with the boot log. null without tests.
+export function bootTest(tree) {
+  return tree.find((m) => m.tests.length)?.tests[0] || null;
 }
 
 // record_property values come as strings, lists as JSON: [[name, text]]
@@ -293,9 +302,10 @@ export function testProperties(properties) {
     .sort(([a], [b]) => a.localeCompare(b));
 }
 
-// xfailed are counted in skipped as well, like the agent's data.misc.summary
+// xfailed are counted in skipped as well, like the agent's data.misc.summary;
+// pending: tests of a running job that have not finished yet (live view)
 export function summarize(tree) {
-  const s = { total: 0, passed: 0, failed: 0, skipped: 0, xfailed: 0, errors: 0 };
+  const s = { total: 0, passed: 0, failed: 0, skipped: 0, xfailed: 0, errors: 0, pending: 0 };
   for (const m of tree) {
     for (const t of m.tests) {
       s.total++;
@@ -303,10 +313,24 @@ export function summarize(tree) {
       else if (t.result === "fail") s.failed++;
       else if (t.result === "skip") s.skipped++;
       else if (t.result === "xfail") { s.skipped++; s.xfailed++; }
+      else if (t.result === "running" || t.result === "pending") s.pending++;
       else s.errors++;
     }
   }
   return s;
+}
+
+// A module's result from its tests: a failure wins, then a running test
+// (live view), then what testTree's modules get from the agent
+export function moduleResult(tests) {
+  const results = tests.map((t) => t.result);
+  if (results.includes("fail")) return "fail";
+  if (results.includes("incomplete")) return "incomplete";
+  if (results.includes("running")) return "running";
+  if (results.length && results.every((r) => r === "pending")) return "pending";
+  if (results.includes("pending")) return "running";
+  if (results.includes("pass") || results.includes("xfail")) return "pass";
+  return results.length ? "skip" : "incomplete";
 }
 
 // A skip or xfail reason with its issue references as links:
@@ -441,8 +465,39 @@ export function liveTests(progress, history = new Map(), now = Date.now()) {
       expectedMs: history.get(`${t.module}/${t.name}`) ?? null,
       elapsedMs: state === "running" && t.started ? Math.max(0, now - parseTime(t.started)) : null,
       console: t.console ?? null,
+      // why it failed, errored, was skipped or is expected to fail (agent's plugin)
+      message: t.message || null,
     };
   });
+}
+
+// The live progress as testTree's shape (in pytest's order), so a running
+// job's page shows the same list as its results will: results so
+// far, the running test ("running") and the rest ("pending"). Tests also get
+// `expectedMs` (history) and `console` (where their part of the live console
+// starts, see consoleRange); durationMs is the time so far while running.
+export function liveTree(progress, history = new Map(), now = Date.now()) {
+  const modules = new Map();
+  for (const t of liveTests(progress, history, now)) {
+    if (!modules.has(t.module)) modules.set(t.module, []);
+    modules.get(t.module).push({
+      id: t.id,
+      name: t.name,
+      result: t.state === "done" ? t.result || "incomplete" : t.state,
+      durationMs: t.state === "done" ? t.ms : t.elapsedMs,
+      expectedMs: t.expectedMs,
+      errorMsg: t.message,
+      logUrl: null,
+      properties: [],
+      console: t.console,
+    });
+  }
+  return [...modules].map(([name, tests]) => ({
+    id: name,
+    name,
+    result: moduleResult(tests),
+    tests,
+  }));
 }
 
 // Time left (ms): what the tests still to come usually take (a test that

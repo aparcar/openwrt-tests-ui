@@ -1,11 +1,20 @@
 // One run (job node): what was tested where, the result per test with its
 // own log, and links to the whole run's files.
+//
+// A running job (one with a live view, model.liveIndexUrl) gets the same
+// page: the same head, facts, files and test list, filled in as the lab
+// reports (views/live.js polls, views/tests.js updates the list in place).
+// Once the job is done the page reloads with the results, in the same places.
 
 import { bootOfJob, buildOfJob, clearCache, fetchText, jobsForPlatformBranch, node, proxiedArtifact, publicLinks, testsOfJob } from "../api.js";
-import { duration, isOfficial, labOf, liveIndexUrl, logLines, reasonParts, releasesOf, safeUrl, status, summarize, testTree, toRun } from "../model.js";
-import { countsBar, emptyState, errorBox, h, link, mount, route, setQuery, statusBadge, timeAgo } from "../ui.js";
-import { liveSection } from "./live.js";
+import {
+  bootTest, duration, isOfficial, labOf, liveIndexUrl, liveTree, logLines, parseTime, releasesOf, remainingMs, safeUrl,
+  status, summarize, testTree, toRun,
+} from "../model.js";
+import { countsBar, emptyState, errorBox, h, link, mount, route, statusBadge, timeAgo } from "../ui.js";
+import { buildSection, followingLog, liveHeadline, LiveRun } from "./live.js";
 import { scheduleBox } from "./schedule.js";
+import { testList } from "./tests.js";
 
 export async function runView(root, state, id) {
   mount(root, h("p", { class: "muted" }, "Loading run…"));
@@ -24,6 +33,7 @@ export async function runView(root, state, id) {
   const links = publicLinks(id);
   const tree = tests.error ? [] : testTree(tests.modules, tests.testsByModule);
   const counts = tree.length ? summarize(tree) : run.summary;
+  const selected = route().query.get("test");
 
   // Neighbours in the same lane (same branch, release or snapshot)
   const lane = history.map(toRun).filter((r) => r.lane === run.lane && (!r.discarded || r.id === id));
@@ -31,18 +41,48 @@ export async function runView(root, state, id) {
   const older = at >= 0 ? lane[at + 1] : null;
   const newer = at > 0 ? lane[at - 1] : null;
 
-  // While it runs (and while its build builds): the live view, until the
-  // node is done; then this page again, with the results
+  // Once a running job (or its build) is done: this page again, with the results
   const reload = () => {
     clearCache();
-    if (route().parts[1] === id) runView(root, state, id);
+    if (route().parts[0] === "run" && route().parts[1] === id && !route().parts[2]) runView(root, state, id);
   };
-  const live = st === "running" && liveIndexUrl(job) && !tree.length
-    ? liveSection(job, { kind: "test", history, onDone: reload }) : null;
-  const buildLive = build && build.state !== "done" && liveIndexUrl(build)
-    ? liveSection(build, { kind: "build", onDone: reload }) : null;
+  const isLive = st === "running" && liveIndexUrl(job) && !tree.length;
+  const page = h("div", {});
+  const alive = () => page.isConnected;
 
-  mount(root,
+  const headStatus = h("div", { class: "head-status" }, statusBadge(st), counts ? countsBar(counts) : null);
+  const headline = h("p", { class: "live-line", "aria-live": "polite" });
+  const durationValue = h("span", {}, run.durationMs != null ? duration(run.durationMs) : "—");
+  const fileLinks = h("div", { class: "file-links" });
+  const testsBody = h("div", {});
+  // The boot log: the first test's log (live: its part of the console), or
+  // for runs without per-test logs the whole console (the boot node's)
+  const firstTest = bootTest(tree);
+  const bootLogUrl = boot?.artifacts?.test_log || null;
+  let liveRun = null;
+  const bootSec = isLive
+    ? bootSection(() => followingLog(liveRun, () => liveRun.consoleOf(liveRun.progress.tests?.[0]?.id),
+      { empty: "No console output yet." }))
+    : firstTest || boot
+      ? bootSection(async () => (firstTest?.logUrl ? finishedLog(firstTest)
+        : bootLogUrl ? logView(await fetchText(bootLogUrl), bootLogUrl)
+          : h("p", { class: "muted" }, "No boot log.")))
+      : null;
+  if (isLive) bootSec.update("pending", "not started yet");
+  else if (bootSec) {
+    bootSec.update(boot?.result || firstTest?.result,
+      firstTest?.logUrl ? `until the shell prompt, from ${firstTest.name}` : bootLogUrl ? "the whole console log" : null);
+  }
+
+  const files = (live) => [
+    Object.entries(TEXT_FILES).map(([key, label]) => job.artifacts?.[key] || (live && LIVE_FILES[key])
+      ? h("a", { class: "file", href: link(["run", id, "file", key]) }, label) : null),
+    fileLink("Firmware ↓", build?.artifacts?.firmware, ow.sha256 ? `sha256 ${ow.sha256}` : null),
+    links.viewer ? h("a", { class: "file", href: links.viewer }, "Raw node in Maestro ↗") : null,
+  ];
+  mount(fileLinks, files(false));
+
+  mount(page,
     h("nav", { class: "crumbs", "aria-label": "Breadcrumb" },
       h("a", { href: link([]) }, "Devices"), " / ",
       h("a", { href: link(["device", run.platform]) }, device.name), " / ",
@@ -52,8 +92,9 @@ export async function runView(root, state, id) {
         h("h1", {}, device.name, " ", h("span", { class: "muted" }, "·"), " ", run.describe),
         h("p", { class: "lede" },
           run.isRelease ? "Release" : "Snapshot", " of ", h("strong", {}, run.branch),
-          ow.target ? [" · ", h("span", { class: "mono" }, `${ow.target}/${ow.profile || ""}`)] : null)),
-      h("div", { class: "head-status" }, statusBadge(st), counts ? countsBar(counts) : null)),
+          ow.target ? [" · ", h("span", { class: "mono" }, `${ow.target}/${ow.profile || ""}`)] : null),
+        isLive ? headline : null),
+      headStatus),
     run.discarded ? h("div", { class: "notice n-discarded", role: "status" },
       h("strong", {}, "Discarded"), run.discarded.reason ? [": ", run.discarded.reason] : null,
       h("span", { class: "muted" }, ` (by ${run.discarded.by || "someone"}`,
@@ -78,31 +119,133 @@ export async function runView(root, state, id) {
         ? h("span", {}, "nightly schedule ", h("span", { class: "muted" }, `(${run.owner})`))
         : h("a", { href: link(["manual"], { by: run.owner }) }, run.owner || "—")),
       fact("Started", timeAgo(run.created)),
-      fact("Duration", run.durationMs != null ? duration(run.durationMs) : "—"),
+      fact("Duration", durationValue),
       fact("Boot", boot ? statusBadge(boot.result || "incomplete") : h("span", { class: "muted" }, "—"))),
-    h("section", { class: "files" },
-      h("h2", {}, "Files"),
-      h("div", { class: "file-links" },
-        Object.entries(TEXT_FILES).map(([key, label]) => job.artifacts?.[key]
-          ? h("a", { class: "file", href: link(["run", id, "file", key]) }, label) : null),
-        fileLink("Firmware ↓", build?.artifacts?.firmware, ow.sha256 ? `sha256 ${ow.sha256}` : null),
-        links.viewer ? h("a", { class: "file", href: links.viewer }, "Raw node in Maestro ↗") : null)),
-    buildLive,
-    live,
-    live ? null : h("section", {},
+    h("section", { class: "files" }, h("h2", {}, "Files"), fileLinks),
+    build && build.state !== "done" && liveIndexUrl(build) ? buildSection(build, { alive, onDone: reload }) : null,
+    bootSec?.el,
+    h("section", {},
       h("div", { class: "section-head" },
         h("h2", {}, "Tests"),
         h("div", { class: "pager" },
           older ? h("a", { href: link(["run", older.id]), title: older.describe }, "← Previous build") : null,
           newer ? h("a", { href: link(["run", newer.id]), title: newer.describe }, "Next build →") : null)),
-      tests.error ? errorBox(tests.error)
-        : tree.length ? testList(tree, st, route().query.get("test"))
-          : emptyState(st === "queued" || st === "running" ? "No results yet" : "No test results",
-            st === "queued" ? "Waiting for a lab with this device to pick the run up."
-              : st === "running" ? `Running on ${lab}.`
-                : "The run ended before any test reported. See the console log and pytest output above.")),
+      testsBody),
     runAgain(run, lab, history.map(toRun), state),
   );
+  mount(root, page);
+
+  if (!isLive) {
+    // a finished run, or one without a live view (older labs)
+    if (tests.error) mount(testsBody, errorBox(tests.error));
+    else if (tree.length) {
+      const list = testList({ logFor: finishedLog, selected });
+      list.update(tree);
+      mount(testsBody, list.el);
+    } else {
+      mount(testsBody, emptyState(st === "queued" || st === "running" ? "No results yet" : "No test results",
+        st === "queued" ? "Waiting for a lab with this device to pick the run up."
+          : st === "running" ? `Running on ${lab}.`
+            : "The run ended before any test reported. See the console log and pytest output above."));
+    }
+    return;
+  }
+
+  // Running: the same parts, filled in from the live view
+  liveRun = new LiveRun(job, { alive, history, onDone: reload });
+  const finished = (testId) => Boolean((liveRun.progress.tests || []).find((t) => t.id === testId)?.result);
+  const list = testList({
+    logFor: (t) => followingLog(liveRun, () => liveRun.consoleOf(t.id), {
+      empty: () => (finished(t.id) ? "No console output during this test." : "No console output yet."),
+    }),
+    selected,
+  });
+  liveRun.want("console"); // the tests' logs are parts of it
+  mount(fileLinks, files(true));
+  let shown = false;
+  liveRun.onUpdate = (r) => {
+    const now = Date.now();
+    const liveTests = liveTree(r.progress, r.durations, now);
+    const sum = liveTests.length ? summarize(liveTests) : null;
+    mount(headStatus, statusBadge("running"), sum ? countsBar(sum) : null);
+    mount(headline, liveHeadline(r, liveTests.length ? remainingMs(flat(liveTests), r.durations) : null),
+      r.stale ? h("span", { class: "t-fail" }, " · no update from the lab for a while") : null,
+      r.problem ? h("span", { class: "muted" }, ` · ${r.problem}`) : null);
+    if (r.progress.started) mount(durationValue, `${duration(now - parseTime(r.progress.started))} so far`);
+    const first = bootTest(liveTests);
+    if (first) bootSec.update(first.result, `until the shell prompt, from ${first.name}`);
+    if (liveTests.length) {
+      list.update(liveTests, { live: true });
+      if (!shown) {
+        mount(testsBody, list.el);
+        shown = true;
+      }
+    } else if (r.index) {
+      mount(testsBody, emptyState("No results yet", r.progress.phase === "fetching"
+        ? `Running on ${lab}: downloading the firmware.` : `Running on ${lab}: starting the tests.`));
+    }
+  };
+  liveRun.onUpdate(liveRun);
+  liveRun.start();
+}
+
+// liveTree's tests as model.remainingMs wants them (state, expectedMs, elapsedMs)
+function flat(tree) {
+  return tree.flatMap((m) => m.tests.map((t) => ({
+    state: t.result === "running" ? "running" : t.result === "pending" ? "pending" : "done",
+    expectedMs: t.expectedMs,
+    elapsedMs: t.result === "running" ? t.durationMs : null,
+  })));
+}
+
+// A finished test's own log (agent: one per test); older runs have none
+async function finishedLog(t) {
+  if (!t.logUrl) {
+    return h("p", { class: "muted" },
+      "No log of its own (runs before the per-test logs only have the whole run's console log, see Files).");
+  }
+  return logView(await fetchText(t.logUrl), t.logUrl);
+}
+
+// The boot: its result and its log. The device boots in the setup of the
+// first test (model.bootTest), so that test's log starts with the boot.
+// logFor() -> Element or Promise<Element>, made when it is first opened.
+// update(result, note): opens by itself while booting and when the boot
+// failed, unless someone opened or closed it.
+function bootSection(logFor) {
+  const summary = h("summary", {});
+  const logHost = h("div", { class: "log-host" });
+  const details = h("details", { class: "module" }, summary, logHost);
+  let loaded = false;
+  let touched = false;
+  // the state we set ourselves: its toggle event is not someone's click
+  let expected = null;
+  details.addEventListener("toggle", async () => {
+    if (expected !== details.open) touched = true;
+    expected = null;
+    if (!details.open || loaded) return;
+    loaded = true;
+    mount(logHost, h("p", { class: "muted" }, "Loading log…"));
+    try {
+      mount(logHost, await logFor());
+    } catch (err) {
+      loaded = false;
+      mount(logHost, h("p", { class: "error" }, String(err.message || err)));
+    }
+  });
+  const update = (result, note) => {
+    details.className = `module c-${result || "incomplete"}`;
+    mount(summary,
+      statusBadge(result || "incomplete", { compact: true }),
+      h("span", { class: "module-name" }, "Boot log"),
+      note ? h("span", { class: "muted module-counts" }, note) : null);
+    if (!touched && !details.open && ["running", "fail", "incomplete"].includes(result || "incomplete")) {
+      expected = true;
+      details.open = true;
+    }
+  };
+  const el = h("section", {}, h("div", { class: "section-head" }, h("h2", {}, "Boot")), details);
+  return { el, update };
 }
 
 // The same build (official ones only) on the same lab
@@ -132,6 +275,9 @@ const TEXT_FILES = {
   job_definition: "Job definition",
 };
 
+// While the job runs, these come from its live view (the log of that name)
+const LIVE_FILES = { test_log: "console", pytest_log: "pytest" };
+
 export async function fileView(root, state, id, key) {
   mount(root, h("p", { class: "muted" }, "Loading…"));
   const job = await node(id);
@@ -143,6 +289,28 @@ export async function fileView(root, state, id, key) {
     h("a", { href: link(["device", run.platform]) }, run.deviceName || run.platform), " / ",
     h("a", { href: link(["run", id]) }, run.describe), " / ",
     h("span", {}, label));
+  const head = (detail) => h("header", { class: "page-head" }, h("div", {},
+    h("h1", {}, label),
+    h("p", { class: "lede" }, `${run.deviceName || run.platform} · ${run.describe} · `, detail)));
+
+  if (!url && job.state !== "done" && liveIndexUrl(job) && LIVE_FILES[key]) {
+    // still running: the log as it grows, then the finished file
+    const page = h("div", {});
+    const detail = h("span", {}, "running, follows the end");
+    const liveRun = new LiveRun(job, {
+      alive: () => page.isConnected,
+      onDone: () => {
+        clearCache();
+        if (route().parts[1] === id && route().parts[3] === key) fileView(root, state, id, key);
+      },
+    });
+    mount(page, crumbs, head(detail),
+      h("div", { class: "log-wrap" }, followingLog(liveRun, () => liveRun.log(LIVE_FILES[key])?.text || "",
+        { full: true, log: LIVE_FILES[key] })));
+    mount(root, page);
+    liveRun.start();
+    return;
+  }
   if (!url) {
     mount(root, crumbs, emptyState(`No ${label.toLowerCase()}`, "This run has no such file."));
     return;
@@ -152,98 +320,12 @@ export async function fileView(root, state, id, key) {
   if (key === "job_definition") {
     try { text = JSON.stringify(JSON.parse(text), null, 2); } catch { /* show as is */ }
   }
-  mount(root, crumbs,
-    h("header", { class: "page-head" }, h("div", {},
-      h("h1", {}, label),
-      h("p", { class: "lede" }, `${run.deviceName || run.platform} · ${run.describe} · `,
-        `${text.split("\n").length} lines`))),
-    logView(text, url, { full: true }));
+  mount(root, crumbs, head(`${text.split("\n").length} lines`), logView(text, url, { full: true }));
 }
 
 function fileLink(label, url, title = null) {
   if (!url) return null;
   return h("a", { class: "file", href: proxiedArtifact(url), title }, label);
-}
-
-// Failed tests first and open; each test expands to its own log
-// selected: a test id from the link (?test=<id>), opened and scrolled to
-function testList(tree, st, selected) {
-  const failedFirst = (a, b) => rank(b.result) - rank(a.result);
-  return h("div", { class: "modules" },
-    [...tree].sort((a, b) => failedFirst(a, b) || a.name.localeCompare(b.name)).map((m) => {
-      const s = summarize([m]);
-      const open = m.result === "fail" || m.result === "incomplete" || (tree.length === 1 && st !== "pass")
-        || m.tests.some((t) => t.id === selected);
-      return h("details", { class: `module c-${m.result || "incomplete"}`, open },
-        h("summary", {},
-          statusBadge(m.result || "incomplete", { compact: true }),
-          h("span", { class: "module-name" }, m.name),
-          h("span", { class: "muted module-counts" }, `${s.passed}/${s.total} passed`,
-            s.failed ? h("span", { class: "t-fail" }, ` · ${s.failed} failed`) : null,
-            s.skipped - s.xfailed ? ` · ${s.skipped - s.xfailed} skipped` : null,
-            s.xfailed ? ` · ${s.xfailed} expected to fail` : null)),
-        h("ul", { class: "tests" }, [...m.tests].sort((a, b) => failedFirst(a, b) || a.name.localeCompare(b.name)).map((t) => testItem(t, t.id === selected))));
-    }));
-}
-
-const rank = (result) => ({ fail: 3, incomplete: 2, error: 2, xfail: 1.5, pass: 1, skip: 0 }[result] ?? 2);
-
-// Why a test was skipped or is expected to fail, issue references linked
-function testReason(t) {
-  const known = t.result === "xfail";
-  return h("p", { class: `test-reason${known ? " r-xfail" : ""}` },
-    h("strong", {}, known ? "Expected to fail: " : "Skipped: "),
-    reasonParts(t.errorMsg).map((p) => (p.url ? h("a", { href: p.url }, p.text) : p.text)),
-    known ? h("span", { class: "muted" }, " (a known problem, not counted as a failure)") : null);
-}
-
-function testItem(t, selected) {
-  const logHost = h("div", { class: "log-host" });
-  let loaded = false;
-  const informational = t.result === "skip" || t.result === "xfail";
-  const item = h("details", { class: `test c-${t.result || "incomplete"}` },
-    h("summary", {},
-      statusBadge(t.result || "incomplete", { compact: true }),
-      h("span", { class: "mono test-name" }, t.name),
-      // failure reason in red, skip and xfail reason muted
-      t.errorMsg ? h("span", { class: `test-error${informational ? "" : " t-fail"}`, title: t.errorMsg },
-        t.errorMsg.split("\n")[0]) : null,
-      h("span", { class: "grow" }),
-      t.properties.length ? h("span", { class: "chip plain", title: "Values the test recorded" },
-        `${t.properties.length} value${t.properties.length === 1 ? "" : "s"}`) : null,
-      h("span", { class: "muted" }, t.durationMs != null ? duration(t.durationMs) : "")));
-  if (informational && t.errorMsg) item.append(testReason(t));
-  if (t.properties.length) item.append(propertiesTable(t.properties));
-  item.append(logHost);
-  item.addEventListener("toggle", async () => {
-    // the address bar links to the open test
-    if (item.open) setQuery({ test: t.id });
-    if (!item.open || loaded) return;
-    loaded = true;
-    mount(logHost, h("p", { class: "muted" }, "Loading log…"));
-    try {
-      if (!t.logUrl) {
-        mount(logHost, h("p", { class: "muted" },
-          "No log of its own (runs before the per-test logs only have the whole run's console log, see Files)."));
-        return;
-      }
-      mount(logHost, logView(await fetchText(t.logUrl), t.logUrl));
-    } catch (err) {
-      mount(logHost, errorBox(err));
-    }
-  });
-  if (selected) {
-    item.open = true; // loads the log via the toggle event
-    requestAnimationFrame(() => item.scrollIntoView({ block: "start" }));
-  }
-  return h("li", {}, item);
-}
-
-// What a test recorded (record_property), shown above its log
-function propertiesTable(properties) {
-  return h("table", { class: "test-properties" },
-    h("tbody", {}, properties.map(([name, value]) =>
-      h("tr", {}, h("th", { scope: "row", class: "mono" }, name), h("td", { class: "mono" }, value)))));
 }
 
 // full: the log is the whole page (no height limit)

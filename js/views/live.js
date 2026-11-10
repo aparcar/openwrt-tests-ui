@@ -1,35 +1,39 @@
-// Live view of a running job or build (model.js, "live view"): what it is
-// doing, its tests (builds: steps) as they finish, the time left, and its
-// logs as they grow. Polls the index every few seconds and fetches only the
-// new chunks; stops once the node is done (then the page shows the results)
-// or the section left the page.
+// A running job or build (model.js, "live view"): polls its index every few
+// seconds, fetches only the new log chunks, and tells the page. The page
+// draws a running job with the same parts as a finished one (views/tests.js
+// for the tests); this file only adds what is live: the poller, a log that
+// follows, and the build's steps while it builds.
 
 import { freshNode, liveChunk, liveIndexText, testsOfJob } from "../api.js";
 import {
-  buildSteps, consoleRange, duration, durationHistory, liveChunkUrl, liveIndexUrl, liveStale, liveTests,
-  parseLiveIndex, phaseLabel, remainingMs, stripTerminal, testTree, toRun, typicalRunMs,
+  buildSteps, consoleRange, duration, durationHistory, liveChunkUrl, liveIndexUrl, liveStale,
+  parseLiveIndex, phaseLabel, stripTerminal, testTree, toRun, typicalRunMs,
 } from "../model.js";
-import { h, mount, statusBadge, timeAgo } from "../ui.js";
+import { h, mount, statusBadge } from "../ui.js";
 
 const POLL_MS = 4000;
 const NODE_EVERY = 4; // ask Maestro whether the node is done every 4th poll
 const HISTORY_RUNS = 3; // earlier runs whose test durations give the time left
 const FETCH_BATCH = 6;
 
-const LOG_LABELS = { console: "Console", pytest: "pytest output", build: "Build log" };
-
 // One log: its chunks so far, as bytes (test console offsets are bytes)
 class LogBuffer {
   constructor(name) {
     this.name = name;
     this.chunks = [];
+    this.bytes = 0;
     this.decoder = new TextDecoder();
     this.text = "";
+    this.loading = Promise.resolve();
   }
 
-  // Fetch chunks up to `count`; returns the new text
-  async load(indexUrl, count) {
-    let added = "";
+  // one load at a time (a poll and a want() can overlap)
+  load(indexUrl, count) {
+    this.loading = this.loading.then(() => this.loadNow(indexUrl, count), () => this.loadNow(indexUrl, count));
+    return this.loading;
+  }
+
+  async loadNow(indexUrl, count) {
     while (this.chunks.length < count) {
       const from = this.chunks.length + 1;
       const to = Math.min(count, from + FETCH_BATCH - 1);
@@ -37,216 +41,204 @@ class LogBuffer {
         (_, i) => liveChunk(liveChunkUrl(indexUrl, this.name, from + i))));
       for (const bytes of batch) {
         this.chunks.push(bytes);
-        added += this.decoder.decode(bytes, { stream: true });
+        this.bytes += bytes.length;
+        this.text += this.decoder.decode(bytes, { stream: true });
       }
     }
-    this.text += added;
-    return added;
   }
 
   // bytes [start, end) as text
-  slice(start, end) {
-    const total = this.chunks.reduce((n, c) => n + c.length, 0);
-    const all = new Uint8Array(total);
+  slice(start, end = null) {
+    const all = new Uint8Array(this.bytes);
     let at = 0;
     for (const c of this.chunks) {
       all.set(c, at);
       at += c.length;
     }
-    return new TextDecoder().decode(all.subarray(start, end ?? total));
+    return new TextDecoder().decode(all.subarray(start, end ?? this.bytes));
   }
 }
 
-// node: the running job (kind "test") or kbuild (kind "build"); history:
-// earlier runs of the same device (job nodes), for the time left; onDone:
-// called once the node is done
-export function liveSection(node, { kind = "test", history = [], onDone = () => {} } = {}) {
-  const url = liveIndexUrl(node);
-  const head = h("div", { class: "live-head" });
-  const list = h("ol", { class: "live-list" });
-  const tabs = h("div", { class: "live-tabs", role: "tablist" });
-  const filterNote = h("div", { class: "live-filter" });
-  const follow = h("input", { type: "checkbox", checked: true });
-  const pre = h("pre", { class: "log live-log", tabindex: "0" });
-  const section = h("section", { class: "live" },
-    h("div", { class: "section-head" },
-      h("h2", {}, kind === "build" ? "Build in progress" : "Live", " ", h("span", { class: "live-dot", "aria-hidden": "true" }))),
-    head,
-    h("div", { class: "live-cols" },
-      list,
-      h("div", { class: "live-logs" },
-        h("div", { class: "log-tools" }, tabs, h("span", { class: "grow" }),
-          h("label", {}, follow, " Follow")),
-        filterNote,
-        pre)));
-
-  const logs = new Map();
-  let index = null;
-  let active = null; // log shown
-  let filter = null; // { id, name }: only this test's part of the console
-  let durations = new Map();
-  let typical = null;
-  let polls = 0;
-  let stopped = false;
-  let wasConnected = false;
-  let problem = null;
-
-  const nearBottom = () => pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
-  const scrollDown = () => { if (follow.checked) pre.scrollTop = pre.scrollHeight; };
-
-  function renderLog() {
-    const buffer = logs.get(active);
-    if (!buffer) {
-      mount(pre, h("span", { class: "muted" }, "Nothing yet."));
-      return;
-    }
-    let text = buffer.text;
-    mount(filterNote);
-    if (filter && active === "console") {
-      const range = consoleRange(index?.progress?.tests || [], filter.id);
-      if (range) text = buffer.slice(range[0], range[1]);
-      mount(filterNote, "Console of ", h("span", { class: "mono" }, filter.name), " · ",
-        h("button", { type: "button", class: "linklike", onclick: () => { filter = null; renderLog(); } }, "show all"));
-    }
-    mount(pre, stripTerminal(text) || h("span", { class: "muted" }, "Nothing yet."));
-    scrollDown();
+// The poller. node: the job (or kbuild); alive(): false once the page left
+// it; onUpdate(run) after every poll; onDone(node) once the node is done.
+// Logs are fetched only once something asked for them (want()).
+export class LiveRun {
+  constructor(node, { alive, onUpdate = () => {}, onDone = () => {}, history = [] }) {
+    this.node = node;
+    this.url = liveIndexUrl(node);
+    this.alive = alive;
+    this.onUpdate = onUpdate;
+    this.onDone = onDone;
+    this.index = null;
+    this.logs = new Map();
+    this.wanted = new Set();
+    this.listeners = new Set();
+    this.failures = 0;
+    this.polls = 0;
+    this.stopped = false;
+    this.durations = new Map();
+    this.typical = null;
+    this.history = history;
   }
 
-  function renderTabs() {
-    const names = Object.keys(index?.logs || {});
-    mount(tabs, names.map((name) => h("button", {
-      type: "button", role: "tab", class: "tab", "aria-selected": String(name === active),
-      onclick: () => { active = name; filter = null; renderTabs(); refreshLog().then(renderLog); },
-    }, LOG_LABELS[name] || name)));
-  }
+  get progress() { return this.index?.progress || {}; }
+  get stale() { return liveStale(this.index); }
+  // only after a few failed reads in a row: a read can meet the index while
+  // the agent replaces it (cut short, or half-written JSON)
+  get problem() { return this.failures >= 3 ? "The live view could not be loaded, trying again." : null; }
 
-  function renderHead() {
-    if (!index) {
-      mount(head, h("p", { class: "muted" }, problem || "Waiting for the first update…"));
-      return;
-    }
-    const p = index.progress || {};
-    const parts = [h("strong", {}, phaseLabel(p.phase))];
-    if (kind === "test") {
-      const tests = liveTests(p, durations);
-      const failed = (p.counts?.fail || 0) + (p.counts?.incomplete || 0);
-      if (p.total != null) parts.push(` · ${p.done}/${p.total} tests`);
-      if (failed) parts.push(h("span", { class: "t-fail" }, ` · ${failed} failed`));
-      const left = p.total != null ? remainingMs(tests, durations) : null;
-      if (left != null && !index.done) parts.push(` · about ${duration(left) || "a moment"} left`);
-      else if (p.total == null && typical) parts.push(h("span", { class: "muted" }, ` · runs usually take ${duration(typical)}`));
-    }
-    if (p.started) parts.push(h("span", { class: "muted" }, " · started ", timeAgo(p.started)));
-    mount(head,
-      h("p", {}, parts),
-      liveStale(index) ? h("div", { class: "notice n-infra", role: "status" },
-        h("strong", {}, "No update "), timeAgo(index.updated),
-        ": the lab may have stopped. The job goes back to the queue or times out.") : null,
-      problem ? h("p", { class: "muted" }, problem) : null);
-  }
-
-  function renderList() {
-    const p = index?.progress || {};
-    if (kind === "build") {
-      const end = index?.done ? Date.parse(index.updated) : Date.now();
-      mount(list, buildSteps(p, end).map((s) => h("li", { class: `live-item ${s.current && !index.done ? "is-running" : ""}` },
-        s.current && !index.done ? statusBadge("running", { compact: true }) : statusBadge("pass", { compact: true }),
-        h("span", { class: "live-name" }, s.name),
-        h("span", { class: "muted" }, duration(s.ms)))));
-      return;
-    }
-    const tests = liveTests(p, durations);
-    if (!tests.length) {
-      mount(list, h("li", { class: "muted" }, p.phase === "fetching" ? "Downloading the firmware…" : "Waiting for pytest to list its tests…"));
-      return;
-    }
-    mount(list, tests.map((t) => {
-      const icon = t.state === "done" ? statusBadge(t.result || "incomplete", { compact: true })
-        : t.state === "running" ? statusBadge("running", { compact: true })
-          : h("span", { class: "badge s-pending", title: "Not run yet" }, h("span", { class: "badge-icon" }, "○"));
-      const time = t.state === "done" ? duration(t.ms)
-        : t.state === "running" ? `${duration(t.elapsedMs) || "0s"}${t.expectedMs ? ` of ~${duration(t.expectedMs)}` : ""}`
-          : t.expectedMs ? `~${duration(t.expectedMs)}` : "";
-      const name = h("span", { class: "live-name" }, h("span", { class: "muted" }, `${t.module} › `), h("span", { class: "mono" }, t.name));
-      return h("li", { class: `live-item s-${t.state}${filter?.id === t.id ? " is-selected" : ""}` },
-        icon,
-        t.console != null
-          ? h("button", { type: "button", class: "linklike", title: "Show this test's part of the console",
-            onclick: () => { active = "console"; filter = { id: t.id, name: t.name }; renderTabs(); refreshLog().then(renderLog); } }, name)
-          : name,
-        h("span", { class: "muted" }, time));
-    }));
-  }
-
-  // Fetch the active log's new chunks; append them unless a filter is shown
-  async function refreshLog() {
-    if (!index || !active || !index.logs[active]) return;
-    if (!logs.has(active)) logs.set(active, new LogBuffer(active));
-    const buffer = logs.get(active);
-    const wasAtBottom = nearBottom();
-    const added = await buffer.load(url, index.logs[active].chunks || 0);
-    if (!added) return;
-    if (filter && active === "console") {
-      renderLog();
-    } else if (pre.firstChild?.classList?.contains?.("muted")) {
-      renderLog();
-    } else {
-      pre.append(stripTerminal(added));
-      if (wasAtBottom) scrollDown();
+  want(log) {
+    if (!this.wanted.has(log)) {
+      this.wanted.add(log);
+      if (this.index) this.poll(true);
     }
   }
 
-  async function loadHistory() {
-    const runs = history.map(toRun).filter((r) => r.id !== node.id && r.state === "done"
+  // listener(run) after every poll, until it returns false
+  listen(listener) {
+    this.listeners.add(listener);
+  }
+
+  log(name) { return this.logs.get(name) || null; }
+
+  // A test's part of the console (model.consoleRange), as text
+  consoleOf(testId) {
+    const buffer = this.log("console");
+    const range = consoleRange(this.progress.tests || [], testId);
+    return buffer && range ? buffer.slice(range[0], range[1]) : "";
+  }
+
+  // The test durations of the device's last finished runs (time left)
+  async loadHistory() {
+    const runs = this.history.map(toRun).filter((r) => r.id !== this.node.id && r.state === "done"
       && (r.result === "pass" || r.result === "fail") && r.summary?.total);
-    typical = typicalRunMs(runs);
+    this.typical = typicalRunMs(runs);
     const trees = await Promise.all(runs.slice(0, HISTORY_RUNS).map((r) =>
       testsOfJob(r.id).then((t) => testTree(t.modules, t.testsByModule)).catch(() => [])));
-    durations = durationHistory(trees);
-    renderHead();
-    renderList();
+    this.durations = durationHistory(trees);
+    this.notify();
   }
 
-  async function poll() {
-    if (stopped) return;
-    if (section.isConnected) wasConnected = true;
-    else if (wasConnected || polls > 3) { stopped = true; return; }
-    polls++;
-    try {
-      const text = await liveIndexText(url);
-      const parsed = text == null ? null : parseLiveIndex(text);
-      if (parsed) {
-        const first = !index;
-        index = parsed;
-        if (first || !active || !index.logs[active]) {
-          active ??= "console" in index.logs ? "console" : Object.keys(index.logs)[0] || null;
-          renderTabs();
-        }
-        await refreshLog();
-        if (first) renderLog();
-      }
-      problem = null;
-    } catch (err) {
-      problem = `Could not load the live view (${err.message}), trying again.`;
+  start() {
+    this.loadHistory();
+    setTimeout(() => this.poll(), 0);
+  }
+
+  notify() {
+    this.onUpdate(this);
+    for (const listener of this.listeners) {
+      if (listener(this) === false) this.listeners.delete(listener);
     }
-    renderHead();
-    renderList();
-    if (index?.done || polls % NODE_EVERY === 0) {
+  }
+
+  async poll(once = false) {
+    if (this.stopped) return;
+    if (!this.alive()) {
+      this.stopped = true;
+      return;
+    }
+    if (!once) this.polls++;
+    try {
+      const text = await liveIndexText(this.url);
+      const index = text == null ? null : parseLiveIndex(text);
+      if (index) {
+        this.index = index;
+        for (const name of this.wanted) {
+          if (!index.logs[name]) continue;
+          if (!this.logs.has(name)) this.logs.set(name, new LogBuffer(name));
+          await this.logs.get(name).load(this.url, index.logs[name].chunks || 0);
+        }
+        this.failures = 0;
+      } else if (text != null) {
+        this.failures++;
+      }
+    } catch {
+      this.failures++;
+    }
+    this.notify();
+    if (once) return;
+    if (this.index?.done || this.polls % NODE_EVERY === 0) {
       try {
-        const now = await freshNode(node.id);
+        const now = await freshNode(this.node.id);
         if (now.state === "done") {
-          stopped = true;
-          onDone(now);
+          this.stopped = true;
+          this.onDone(now);
           return;
         }
       } catch { /* next time */ }
     }
-    setTimeout(poll, POLL_MS);
+    setTimeout(() => this.poll(), POLL_MS);
   }
+}
 
-  renderHead();
-  renderList();
-  if (kind === "test") loadHistory();
-  setTimeout(poll, 0);
+// A log that grows: text() gives what to show; it follows the end while
+// the reader is at the bottom (scrolling up stops that, scrolling back down
+// resumes it)
+export function followingLog(run, text, { full = false, log = "console", empty = "Nothing yet." } = {}) {
+  run.want(log);
+  const pre = h("pre", { class: full ? "log full" : "log" });
+  let shown = null;
+  const atBottom = () => (full
+    ? window.innerHeight + window.scrollY >= document.body.scrollHeight - 40
+    : pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40);
+  const render = () => {
+    // a closed test: catch up when it is opened again (next poll)
+    if (!full && pre.isConnected && !pre.closest("details")?.open) return true;
+    const text_ = stripTerminal(text());
+    // nothing yet: the placeholder (it can change, e.g. once the test is done)
+    const placeholder = text_ ? null : (typeof empty === "function" ? empty() : empty);
+    const next = text_ || `\0${placeholder}`;
+    if (next === shown) return pre.isConnected;
+    const follow = atBottom();
+    if (text_ && shown && !shown.startsWith("\0") && next.startsWith(shown)) pre.append(next.slice(shown.length));
+    else mount(pre, text_ || h("span", { class: "muted" }, placeholder));
+    shown = next;
+    if (follow) {
+      if (full) window.scrollTo(0, document.body.scrollHeight);
+      else pre.scrollTop = pre.scrollHeight;
+    }
+    return pre.isConnected;
+  };
+  render();
+  run.listen(() => render());
+  return pre;
+}
+
+// What is happening now, for the page head: "Testing · about 6 min left"
+export function liveHeadline(run, remaining) {
+  const p = run.progress;
+  if (!run.index) return run.problem || "Waiting for the lab's first update…";
+  const parts = [phaseLabel(p.phase)];
+  if (remaining != null && !run.index.done) parts.push(`about ${duration(remaining) || "a moment"} left`);
+  else if (p.total == null && run.typical) parts.push(`runs usually take ${duration(run.typical)}`);
+  return parts.join(" · ");
+}
+
+// A build that is still building: its steps and its log
+export function buildSection(build, { alive, onDone }) {
+  const steps = h("ul", { class: "tests steps" });
+  const head = h("p", { class: "muted" }, "Waiting for the build agent's first update…");
+  const logHost = h("div", { class: "log-host" });
+  const section = h("section", {},
+    h("div", { class: "section-head" }, h("h2", {}, "Build")),
+    h("div", { class: "module c-running build-steps" }, head, steps, logHost));
+  const run = new LiveRun(build, {
+    alive,
+    onDone,
+    onUpdate: (r) => {
+      if (!r.index) return;
+      const end = r.index.done ? Date.parse(r.index.updated) : Date.now();
+      const list = buildSteps(r.progress, end);
+      mount(head, r.stale ? h("span", { class: "t-fail" }, "No update from the build agent for a while.")
+        : `${phaseLabel(r.progress.phase)} · ${list.length} step${list.length === 1 ? "" : "s"} so far`);
+      mount(steps, list.map((s) => h("li", { class: "step" },
+        statusBadge(s.current && !r.index.done ? "running" : "pass", { compact: true }),
+        h("span", { class: "mono test-name" }, s.name),
+        h("span", { class: "grow" }),
+        h("span", { class: "muted test-time" }, duration(s.ms)))));
+    },
+  });
+  mount(logHost, followingLog(run, () => run.log("build")?.text || "", { log: "build" }));
+  run.start();
   return section;
 }

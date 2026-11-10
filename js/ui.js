@@ -52,7 +52,12 @@ export function timeAgo(iso) {
   return h("time", { datetime: exact, title: new Date(exact).toLocaleString() }, relativeTime(iso));
 }
 
-// passed/failed/skipped as a segmented bar plus text
+// The tests that ran: skipped ones (xfailed included) don't count against a
+// run, and pending ones (a running job) haven't run yet
+export const ranCount = (s) => s.total - (s.skipped || 0) - (s.pending || 0);
+
+// passed/failed/skipped as a segmented bar plus text: "44/50" is passed of
+// the tests that ran, so skipped tests don't read as failures
 export function countsBar(summary) {
   if (!summary || !summary.total) return h("span", { class: "muted" }, "—");
   const pct = (n) => `${(100 * n) / summary.total}%`;
@@ -60,13 +65,14 @@ export function countsBar(summary) {
   // xfailed (expected failures) are part of skipped
   const xfailed = summary.xfailed || 0;
   const title = `${summary.passed} passed, ${failed} failed, ${summary.skipped - xfailed} skipped`
-    + (xfailed ? `, ${xfailed} expected to fail` : "");
+    + (xfailed ? `, ${xfailed} expected to fail` : "")
+    + (summary.pending ? `, ${summary.pending} still to run` : "");
   return h("span", { class: "counts", title },
     h("span", { class: "bar", "aria-hidden": "true" },
       h("span", { class: "seg s-pass", style: `width:${pct(summary.passed)}` }),
       h("span", { class: "seg s-fail", style: `width:${pct(failed)}` }),
       h("span", { class: "seg s-skip", style: `width:${pct(summary.skipped)}` })),
-    h("span", { class: "counts-text" }, `${summary.passed}/${summary.total}`,
+    h("span", { class: "counts-text" }, `${summary.passed}/${ranCount(summary)}`,
       failed ? h("span", { class: "t-fail" }, ` · ${failed} failed`) : null));
 }
 
