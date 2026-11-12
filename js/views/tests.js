@@ -24,9 +24,10 @@ export function testList({ logFor, selected = null }) {
     let entry = modules.get(m.name);
     if (!entry) {
       const summary = h("summary", {});
+      const about = h("div", {});
       const ul = h("ul", { class: "tests" });
-      const el = h("details", {}, summary, ul);
-      entry = { el, ul, summary, tests: new Map(), touched: false, auto: false, expected: null };
+      const el = h("details", {}, summary, about, ul);
+      entry = { el, ul, summary, about, aboutText: null, tests: new Map(), touched: false, auto: false, expected: null };
       el.addEventListener("toggle", () => {
         if (entry.expected !== el.open) entry.touched = true;
         entry.expected = null;
@@ -41,13 +42,18 @@ export function testList({ logFor, selected = null }) {
     entry.el.className = `module c-${m.result || "incomplete"}`;
     mount(entry.summary,
       statusBadge(m.result || "incomplete", { compact: true }),
-      h("span", { class: "module-name" }, m.name),
+      h("span", { class: "module-name", title: firstParagraph(m.description) }, m.name),
       // passed of the tests that ran: skipped ones are not failures
       h("span", { class: "muted module-counts" }, ranCount(s) ? `${s.passed}/${ranCount(s)} passed` : s.pending ? "not run yet" : "none ran",
         s.failed ? h("span", { class: "t-fail" }, ` · ${s.failed} failed`) : null,
         s.skipped - s.xfailed ? ` · ${s.skipped - s.xfailed} skipped` : null,
         s.xfailed ? ` · ${s.xfailed} expected to fail` : null,
         s.pending ? ` · ${s.pending} to go` : null));
+    // what the module covers, above its tests
+    if (m.description !== entry.aboutText) {
+      entry.aboutText = m.description;
+      mount(entry.about, m.description ? testDescription(m.description, "module-description") : null);
+    }
     // live: open the module of the running test; close it again once it is
     // through, unless it failed or someone opened or closed it
     if (live && !entry.touched) {
@@ -137,6 +143,17 @@ function testReason(t) {
     known ? h("span", { class: "muted" }, " (a known problem, not counted as a failure)") : null);
 }
 
+// What a test or module checks and why (its docstring), paragraphs as written
+function testDescription(text, cls = "test-description") {
+  return h("div", { class: cls },
+    text.split(/\n\s*\n/).map((p) => h("p", {}, p.replace(/\s*\n\s*/g, " "))));
+}
+
+// A docstring's first paragraph, for a tooltip; null without one
+function firstParagraph(text) {
+  return text?.split(/\n\s*\n/)[0] || null;
+}
+
 // What a test recorded (record_property), shown above its log
 function propertiesTable(properties) {
   return h("table", { class: "test-properties" },
@@ -203,7 +220,8 @@ function testItem(t, logFor, selected) {
     details.className = `test c-${next.result || "incomplete"}`;
     mount(summary,
       statusBadge(next.result || "incomplete", { compact: true }),
-      h("span", { class: "mono test-name" }, next.name),
+      // hovering the name tells what the test is about (first paragraph)
+      h("span", { class: "mono test-name", title: firstParagraph(next.description) }, next.name),
       // failure reason in red, skip and xfail reason muted
       next.errorMsg ? h("span", { class: `test-error${informational ? "" : " t-fail"}`, title: next.errorMsg },
         next.errorMsg.split("\n")[0]) : null,
@@ -211,11 +229,12 @@ function testItem(t, logFor, selected) {
       next.properties.length ? h("span", { class: "chip plain", title: "Values the test recorded" },
         `${next.properties.length} value${next.properties.length === 1 ? "" : "s"}`) : null,
       h("span", { class: "muted test-time" }, timeText(next)));
-    // reason and recorded values: only rebuilt when they changed
-    const key = JSON.stringify([next.result, next.errorMsg, next.properties]);
+    // description, reason and recorded values: only rebuilt when they changed
+    const key = JSON.stringify([next.result, next.errorMsg, next.properties, next.description]);
     if (key !== extraKey) {
       extraKey = key;
       mount(extra,
+        next.description ? testDescription(next.description) : null,
         informational && next.errorMsg ? testReason(next) : null,
         next.properties.length ? propertiesTable(next.properties) : null);
     }

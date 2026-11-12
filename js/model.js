@@ -261,6 +261,8 @@ export function testTree(modules, testsByModule) {
       id: m.id,
       name: m.name,
       result: m.result,
+      // what the module covers (its docstring); older runs have none
+      description: m.data?.misc?.description || null,
       tests: (testsByModule[m.id] || [])
         .map((t) => ({
           id: t.id,
@@ -274,6 +276,8 @@ export function testTree(modules, testsByModule) {
           logUrl: t.artifacts?.test_log || null,
           // what the test measured (record_property), name -> value
           properties: testProperties(t.data?.misc?.properties),
+          // what it checks and why (its docstring); older runs have none
+          description: t.data?.misc?.description || null,
         })),
     }));
 }
@@ -514,6 +518,7 @@ export function liveTree(progress, history = new Map(), now = Date.now()) {
       errorMsg: t.message,
       logUrl: null,
       properties: [],
+      description: null,
       console: t.console,
     });
   }
@@ -521,6 +526,7 @@ export function liveTree(progress, history = new Map(), now = Date.now()) {
     id: name,
     name,
     result: moduleResult(tests),
+    description: null,
     tests,
   }));
 }

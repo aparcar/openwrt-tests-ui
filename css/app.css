@@ -235,6 +235,9 @@ summary > .badge, summary > .chip { flex: none; }
   overflow-wrap: anywhere; white-space: pre-wrap;
 }
 .test-reason.r-xfail { border-left-color: var(--xfail); background: var(--xfail-bg); }
+.test-description { margin: 0.25rem 0.9rem 0.5rem 1.6rem; max-width: 70ch; font-size: 0.88rem; color: var(--muted); }
+.module-description { margin: 0; padding: 0.4rem 0.9rem 0.3rem; max-width: 80ch; font-size: 0.88rem; color: var(--muted); border-top: 1px solid var(--border); }
+.test-description p, .module-description p { margin: 0 0 0.35rem; }
 table.test-properties { width: auto; margin: 0.25rem 0.9rem 0.5rem 1.6rem; font-size: 0.85rem; }
 table.test-properties th, table.test-properties td { padding: 0.2rem 1rem 0.2rem 0; border-bottom: 1px dashed var(--border); }
 table.test-properties th { color: var(--muted); font-weight: 500; }

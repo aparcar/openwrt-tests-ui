@@ -142,6 +142,18 @@ test("test properties: sorted, JSON lists joined, other values as they are", () 
   assert.deepEqual(m.tests[0].properties, [["used_memory", "38"]]);
 });
 
+test("test description: the docstring the agent stored, null for older runs", () => {
+  const [m] = testTree([{ id: "m", name: "base" }], { m: [
+    { id: "a", name: "test_shell", data: { misc: { description: "A shell on the console." } } },
+    { id: "b", name: "test_ssh", data: { misc: {} } },
+  ] });
+  assert.equal(m.tests[0].description, "A shell on the console.");
+  assert.equal(m.tests[1].description, null);
+  assert.equal(m.description, null);
+  const [described] = testTree([{ id: "m", name: "base", data: { misc: { description: "The basics." } } }], {});
+  assert.equal(described.description, "The basics.");
+});
+
 test("formatting", () => {
   const now = Date.parse("2026-10-06T12:00:00Z");
   assert.equal(relativeTime("2026-10-06T11:58:00.000", now), "2 minutes ago");
