@@ -68,7 +68,7 @@ export async function deviceView(root, state, platform) {
               " ", manualBadge(r, state.config.official),
               r.trigger.title ? h("span", { class: "sub" }, r.trigger.title) : null,
               r.errorMsg ? h("span", { class: "sub t-fail" }, r.errorMsg) : null),
-            h("td", {}, r.summary ? countsBar(r.summary) : h("span", { class: "muted" }, "—")),
+            h("td", {}, r.summary ? countsBar(r.summary, r.aborted) : h("span", { class: "muted" }, "—")),
             h("td", {}, labOf(r, inv.pools) || h("span", { class: "muted" }, "waiting")),
             h("td", {}, r.durationMs != null ? duration(r.durationMs) : h("span", { class: "muted" }, "—")),
             h("td", {}, timeAgo(r.created)))))))));

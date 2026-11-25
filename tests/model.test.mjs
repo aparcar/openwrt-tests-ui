@@ -6,7 +6,7 @@ import {
   compareLanes, deviceHealth, duration, groupByLane, healthOfPlatform, healthReason, inventory, isOfficial, placeLabel, platformAvailable, queue, safeUrl, releaseOf, releasesOf, scheduleCommand, labOf, labStats, laneCell, laneLabel, logLines, relativeTime,
   reasonParts, STATUS, status, summarize, targetCoverage, testProperties, testTree, toRun, worstStatus,
   buildSteps, consoleRange, durationHistory, liveChunkUrl, liveIndexUrl, liveStale, liveTests, parseLiveIndex, phaseLabel, remainingMs, stripTerminal, typicalRunMs,
-  bootTest, liveTree, moduleResult, splitFailure,
+  abortedOf, bootTest, liveTree, moduleResult, splitFailure,
 } from "../js/model.js";
 
 const job = (over = {}) => ({
@@ -326,6 +326,20 @@ test("summary and durations from data.misc", () => {
   const tree = testTree([{ id: "m", name: "base", result: "pass" }],
     { m: [{ id: "t", name: "test_shell", result: "pass", data: { misc: { duration_ms: 1200 } } }] });
   assert.equal(tree[0].tests[0].durationMs, 1200);
+});
+
+test("aborted: the agent's summary.aborted, or older runs that lost the shell after booting", () => {
+  const summary = { total: 30, passed: 12, failed: 0, errors: 0, skipped: 18, boot: "pass" };
+  const lost = (over) => toRun(job({ result: "fail", data: { error_msg: "firmware did not reach a shell", ...over } }));
+  assert.equal(toRun(job({ data: { misc: { summary } } })).aborted, null);
+  assert.deepEqual(lost({ misc: { summary: { ...summary, aborted: true, aborted_after: "system::test_reboot" } } }).aborted,
+    { after: "system::test_reboot" });
+  assert.deepEqual(lost({ misc: { summary } }).aborted, { after: null });
+  // the first boot failed, or a test failed: not aborted
+  assert.equal(lost({ misc: { summary: { ...summary, boot: "fail" } } }).aborted, null);
+  assert.equal(lost({ misc: { summary: { ...summary, failed: 1 } } }).aborted, null);
+  assert.equal(lost({}).aborted, null);
+  assert.equal(abortedOf({ result: "pass", summary }), null);
 });
 
 test("official runs: created by the schedule's user; trigger from data.misc", () => {

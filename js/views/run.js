@@ -50,7 +50,7 @@ export async function runView(root, state, id) {
   const page = h("div", {});
   const alive = () => page.isConnected;
 
-  const headStatus = h("div", { class: "head-status" }, statusBadge(st), counts ? countsBar(counts) : null);
+  const headStatus = h("div", { class: "head-status" }, statusBadge(st), counts ? countsBar(counts, run.aborted) : null);
   const headline = h("p", { class: "live-line", "aria-live": "polite" });
   const durationValue = h("span", {}, run.durationMs != null ? duration(run.durationMs) : "—");
   const fileLinks = h("div", { class: "file-links" });

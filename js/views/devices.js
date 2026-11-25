@@ -169,7 +169,7 @@ function deviceRow(d, row, lanes, pools) {
         h("a", { href: link(["run", r.id]), class: "cell-link", title: `${r.describe}: ${labOf(r, pools) ? `on ${labOf(r, pools)}` : "waiting for a lab"}` },
           h("span", { class: "cell-top" }, statusBadge(cell.status),
             cell.newFailure ? h("span", { class: "chip new", title: "Passed on the previous build" }, "new") : null),
-          h("span", { class: "cell-meta" }, r.summary ? countsBar(r.summary) : null),
+          h("span", { class: "cell-meta" }, r.summary ? countsBar(r.summary, r.aborted) : null),
           h("span", { class: "cell-meta muted" }, r.describe, " · ", timeAgo(r.created))));
     }),
     labsCell(d));

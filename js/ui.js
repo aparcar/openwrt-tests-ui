@@ -57,8 +57,10 @@ export function timeAgo(iso) {
 export const ranCount = (s) => s.total - (s.skipped || 0) - (s.pending || 0);
 
 // passed/failed/skipped as a segmented bar plus text: "44/50" is passed of
-// the tests that ran, so skipped tests don't read as failures
-export function countsBar(summary) {
+// the tests that ran, so skipped tests don't read as failures. An aborted
+// run (model.abortedOf) says so instead: "12/12" would hide the tests that
+// never ran.
+export function countsBar(summary, aborted = null) {
   if (!summary || !summary.total) return h("span", { class: "muted" }, "—");
   const pct = (n) => `${(100 * n) / summary.total}%`;
   const failed = (summary.failed || 0) + (summary.errors || 0);
@@ -72,7 +74,10 @@ export function countsBar(summary) {
       h("span", { class: "seg s-pass", style: `width:${pct(summary.passed)}` }),
       h("span", { class: "seg s-fail", style: `width:${pct(failed)}` }),
       h("span", { class: "seg s-skip", style: `width:${pct(summary.skipped)}` })),
-    h("span", { class: "counts-text" }, `${summary.passed}/${ranCount(summary)}`,
+    aborted ? h("span", { class: "counts-text" },
+      h("span", { class: "t-fail" }, aborted.after ? `aborted after ${aborted.after}` : "aborted"),
+      ` · ${summary.passed} passed of ${summary.total} run`)
+    : h("span", { class: "counts-text" }, `${summary.passed}/${ranCount(summary)}`,
       failed ? h("span", { class: "t-fail" }, ` · ${failed} failed`) : null));
 }
 

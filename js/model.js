@@ -13,7 +13,7 @@ export function toRun(job) {
   const ow = data.misc?.openwrt || data.openwrt || {};
   const rev = data.kernel_revision || {};
   const isRelease = (rev.commit_tags || []).length > 0;
-  return {
+  const run = {
     id: job.id,
     parent: job.parent,
     name: job.name,
@@ -55,6 +55,21 @@ export function toRun(job) {
     errorMsg: data.error_msg || null,
     artifacts: job.artifacts || {},
   };
+  run.aborted = abortedOf(run);
+  return run;
+}
+
+// A run cut short: the first boot passed, then a test lost the shell and the
+// rest never ran. { after: "<module>::<test>" } (the last test that ran) from
+// the agent's summary.aborted; older runs only failed with "firmware did not
+// reach a shell" although boot passed and nothing failed ({ after: null }).
+// null when not aborted.
+export function abortedOf(run) {
+  const s = run.summary;
+  if (s?.aborted) return { after: s.aborted_after || null };
+  if (run.result === "fail" && s?.boot === "pass" && !s.failed && !s.errors
+    && run.errorMsg === "firmware did not reach a shell") return { after: null };
+  return null;
 }
 
 // Older jobs have no data.openwrt.release: main -> SNAPSHOT, a release tag
